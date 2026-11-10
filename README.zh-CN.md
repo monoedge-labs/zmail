@@ -86,7 +86,7 @@ ZMAIL_SHOTS=/tmp/shots go test .      # 为每个页面生成截图
 ZMAIL_IMAP_DEBUG=1 zmail sync         # 打印 IMAP 通信过程，不含凭据
 ```
 
-界面由 [MyGo](https://github.com/egoist/mygo) 和 [Lobe MyGo](https://github.com/lobehub/lobe-mygo) 原生绘制。`site/` 是项目网页和隐私政策，有英文和简体中文两个版本。
+界面由 [MyGo](https://github.com/egoist/mygo) 和 [Lobe MyGo](https://github.com/lobehub/lobe-mygo) 原生绘制。项目网页是 [zmail.zausau.com](https://zmail.zausau.com/zh.html)，有英文和简体中文两个版本。
 
 ## 隐私
 

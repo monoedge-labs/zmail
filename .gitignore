@@ -3,11 +3,3 @@
 mygo_windows_*.syso
 /zmail
 .DS_Store
-/site/node_modules/
-/site/dist/
-/site/.env
-/site/.agents/
-/site/AGENTS.md
-/site/CLAUDE.md
-/site/bun.lock
-/site/*.tgz

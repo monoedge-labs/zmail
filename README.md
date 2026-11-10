@@ -107,8 +107,8 @@ ZMAIL_IMAP_DEBUG=1 zmail sync         # prints the IMAP conversation, credential
 ```
 
 The UI is drawn natively with [MyGo](https://github.com/egoist/mygo) and
-[Lobe MyGo](https://github.com/lobehub/lobe-mygo). `site/` holds the project's
-web page and privacy policy, in English and Simplified Chinese.
+[Lobe MyGo](https://github.com/lobehub/lobe-mygo). The project's web page is
+[zmail.zausau.com](https://zmail.zausau.com), in English and Simplified Chinese.
 
 ## Privacy
 
