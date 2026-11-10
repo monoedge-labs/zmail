@@ -1,5 +1,7 @@
 # Zmail
 
+[简体中文](README.zh-CN.md)
+
 A local mail client for people who work with AI agents. Your mail is synced to
 your own Mac, shown in a frosted-glass window, and offered to your agents through
 a local [MCP](https://modelcontextprotocol.io) port. Agents can read, mark as
@@ -9,10 +11,6 @@ Zmail is **source-available** under the
 [PolyForm Noncommercial License 1.0.0](LICENSE): free for personal and other
 noncommercial use. Commercial use needs a license from the maintainer, see
 [COMMERCIAL.md](COMMERCIAL.md).
-
-给和 AI agent 一起工作的人用的本地邮件客户端：邮件只同步到你自己的 Mac，窗口是毛玻璃界面，
-同时通过本机 MCP 端口交给 agent 读取、标记已读、归档、移动到文件夹，不提供发送、回复和删除。
-许可证为 PolyForm Noncommercial 1.0.0，非商业用途免费，商业用途请见 [COMMERCIAL.md](COMMERCIAL.md)。
 
 ## What it does
 
@@ -110,13 +108,12 @@ ZMAIL_IMAP_DEBUG=1 zmail sync         # prints the IMAP conversation, credential
 
 The UI is drawn natively with [MyGo](https://github.com/egoist/mygo) and
 [Lobe MyGo](https://github.com/lobehub/lobe-mygo). `site/` holds the project's
-web page and privacy policy.
+web page and privacy policy, in English and Simplified Chinese.
 
 ## Privacy
 
 Zmail runs on your computer and sends your mail nowhere. See the
-[privacy policy](site/public/privacy.html), also published with the
-project's web page.
+[privacy policy](https://zmail.zausau.com/privacy.html).
 
 ## License
 
