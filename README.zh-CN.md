@@ -64,8 +64,8 @@ zmail sync                                                # 立即收取新邮�
 4. 登录：
 
 ```sh
-read -rs ZMAIL_CLIENT_SECRET; export ZMAIL_CLIENT_SECRET      # 粘贴密钥，输入不会回显
 zmail account add --provider google --email you@example.com --oauth --client-id <client-id>
+# 会提示输入客户端密钥，输入不回显；也可以预先设置 $ZMAIL_CLIENT_SECRET
 ```
 
 Zmail 会打开浏览器，通过本机回环端口接收授权结果，并把刷新令牌保存在钥匙串里。项目处于“测试”状态时，Google 会在 7 天后让令牌过期。同步报告登录失败时重新运行这条命令，或者发布项目的权限请求页面。

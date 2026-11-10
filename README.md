@@ -77,8 +77,8 @@ Google Workspace accounts have not accepted passwords from mail apps since
 4. Sign in:
 
 ```sh
-read -rs ZMAIL_CLIENT_SECRET; export ZMAIL_CLIENT_SECRET      # paste the secret, it is not echoed
 zmail account add --provider google --email you@example.com --oauth --client-id <client-id>
+# asks for the client secret without echoing it; or set $ZMAIL_CLIENT_SECRET
 ```
 
 Zmail opens your browser, receives the answer on a loopback port, and keeps the

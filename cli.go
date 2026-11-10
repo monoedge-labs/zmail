@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -13,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/monoedge-labs/zmail/internal/mailbox"
 	"github.com/monoedge-labs/zmail/internal/store"
@@ -30,7 +33,8 @@ const cliUsage = `zmail — a local mail client for agents
                                          the app password comes from stdin or $ZMAIL_PASSWORD
   zmail account add --provider google --email ADDR --oauth --client-id ID
                                          sign in through the browser (Google Workspace);
-                                         the client secret is read from $ZMAIL_CLIENT_SECRET
+                                         the client secret comes from $ZMAIL_CLIENT_SECRET,
+                                         or is asked for without echo
   zmail account remove --email ADDR      forget an account and its password here
   zmail sync                             fetch new mail now
   zmail connect [--json]                 where and how an agent reaches the MCP port
@@ -149,9 +153,21 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 				return fmt.Errorf("--oauth is for --provider google")
 			}
 			id := cmp.Or(*clientID, os.Getenv("ZMAIL_CLIENT_ID"))
+			if id == "" {
+				return fmt.Errorf("--oauth needs the OAuth client ID: --client-id or $ZMAIL_CLIENT_ID")
+			}
 			cs := os.Getenv("ZMAIL_CLIENT_SECRET")
-			if id == "" || cs == "" {
-				return fmt.Errorf("--oauth needs the OAuth client: --client-id (or $ZMAIL_CLIENT_ID) and $ZMAIL_CLIENT_SECRET")
+			if cs == "" {
+				fmt.Fprint(os.Stderr, "OAuth client secret: ")
+				var err error
+				cs, err = readSecretLine(in)
+				fmt.Fprintln(os.Stderr)
+				if err != nil {
+					return err
+				}
+			}
+			if cs == "" {
+				return fmt.Errorf("--oauth needs the OAuth client secret, on stdin or in $ZMAIL_CLIENT_SECRET")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
@@ -211,6 +227,27 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 		return fmt.Errorf("no account %s", *email)
 	}
 	return fmt.Errorf("unknown account command %q\n\n%s", args[1], cliUsage)
+}
+
+// readSecretLine reads one line from in, with the terminal's echo off when in
+// is a terminal, so that a pasted secret is not shown.
+// ponytail: TIOCGETA is the macOS/BSD request; Linux would need TCGETS.
+func readSecretLine(in io.Reader) (string, error) {
+	if f, ok := in.(*os.File); ok {
+		fd := int(f.Fd())
+		if t, err := unix.IoctlGetTermios(fd, unix.TIOCGETA); err == nil {
+			quiet := *t
+			quiet.Lflag &^= unix.ECHO
+			if unix.IoctlSetTermios(fd, unix.TIOCSETA, &quiet) == nil {
+				defer unix.IoctlSetTermios(fd, unix.TIOCSETA, t)
+			}
+		}
+	}
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }
 
 // googleLogin and openURL are variables so that tests need no browser.

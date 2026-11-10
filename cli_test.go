@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -79,5 +80,28 @@ func TestConnectCLI(t *testing.T) {
 	again, _ := run(t, dir, memSecrets{}, "", "connect", "--json")
 	if again != out {
 		t.Error("the token must stay the same between runs")
+	}
+}
+
+func TestOAuthSecretFromStdin(t *testing.T) {
+	testDial = func(store.Account, string) mailbox.Remote { return quiet{} }
+	t.Setenv("ZMAIL_CLIENT_SECRET", "")
+	var gotID, gotSecret string
+	login := googleLogin
+	googleLogin = func(_ context.Context, id, secret, _ string, _ func(string)) (string, error) {
+		gotID, gotSecret = id, secret
+		return `{"refresh_token":"r"}`, nil
+	}
+	t.Cleanup(func() { testDial, googleLogin = nil, login })
+	dir, sec := t.TempDir(), memSecrets{}
+
+	if _, err := run(t, dir, sec, "", "account", "add", "--provider", "google", "--email", "me@example.com", "--oauth", "--client-id", "cid"); err == nil {
+		t.Error("an empty client secret must be refused")
+	}
+	if _, err := run(t, dir, sec, "  s3cret \n", "account", "add", "--provider", "google", "--email", "me@example.com", "--oauth", "--client-id", "cid"); err != nil {
+		t.Fatal(err)
+	}
+	if gotID != "cid" || gotSecret != "s3cret" {
+		t.Errorf("login got id %q secret %q", gotID, gotSecret)
 	}
 }
