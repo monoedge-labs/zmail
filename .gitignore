@@ -10,3 +10,4 @@ mygo_windows_*.syso
 /site/AGENTS.md
 /site/CLAUDE.md
 /site/bun.lock
+/site/*.tgz

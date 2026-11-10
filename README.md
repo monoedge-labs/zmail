@@ -115,7 +115,7 @@ web page and privacy policy.
 ## Privacy
 
 Zmail runs on your computer and sends your mail nowhere. See the
-[privacy policy](site/public/privacy/index.html), also published with the
+[privacy policy](site/public/privacy.html), also published with the
 project's web page.
 
 ## License
