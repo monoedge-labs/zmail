@@ -61,9 +61,9 @@ func demoService(st *store.Store) *mailbox.Service {
 	}
 	h := time.Hour
 	seeds := []seed{
-		{0, "林晓", "lin@acme.com", "设计评审改到周四 15:00", "周四下午三点可以吗？会议室已订好。\n\n另外请把 Q3 的指标表带上。", store.CatPerson, 25 * time.Minute, false, ""},
+		{0, "林晓", "lin@acme.com", "设计评审改到周四 15:00", "周四下午三点可以吗？会议室已订好，[议程在这里](https://example.com/agenda)。\n\n另外请把 **Q3 的指标表**带上。", store.CatPerson, 25 * time.Minute, false, ""},
 		{0, "GitHub", "noreply@github.com", "[zmail] CI 通过：main", "All checks passed.", store.CatNotification, 2 * h, false, ""},
-		{1, "Stripe", "receipts@stripe.com", "你的 11 月收据", "已收到付款 $20.00。", store.CatNotification, 5 * h, true, store.ActorAgent},
+		{1, "Stripe", "receipts@stripe.com", "你的 11 月收据", "已收到付款 \\$20.00。", store.CatNotification, 5 * h, true, store.ActorAgent},
 		{2, "王磊", "wanglei@qq.com", "周末爬山？", "周六早上八点，老地方集合。", store.CatPerson, 8 * h, false, ""},
 		{0, "Go Weekly", "news@golangweekly.com", "Go Weekly #581", "本周：Go 1.27 的新特性。", store.CatNewsletter, 20 * h, true, store.ActorAgent},
 		{1, "阿里云", "service@aliyun.com", "账单提醒", "本月消费 ¥128.40。", store.CatNotification, 26 * h, true, store.ActorAgent},
@@ -83,7 +83,7 @@ func demoService(st *store.Store) *mailbox.Service {
 		if err := st.UpsertMessage(store.Message{
 			AccountID: a.ID, Folder: "INBOX", Role: store.RoleInbox, UID: uint32(i + 1),
 			ThreadKey: mailbox.ThreadKey(s.subj), FromName: s.name, FromAddr: s.addr, Subject: s.subj,
-			Snippet: mailbox.Snippet(s.body, 140), Body: s.body, Date: now.Add(-s.ago), Seen: false, Category: s.cat,
+			Snippet: mailbox.Snippet(mailbox.PlainText(s.body), 140), Body: s.body, Date: now.Add(-s.ago), Seen: false, Category: s.cat,
 		}); err != nil {
 			panic(err)
 		}

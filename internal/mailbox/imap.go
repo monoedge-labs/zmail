@@ -337,8 +337,8 @@ func (r *IMAP) Move(folder string, uids []uint32, dest string) (mapped map[uint3
 	return mapped, err
 }
 
-// parseBody returns the text of a message cut off after its first parts: its
-// text/plain part, or its text/html one with the tags taken out.
+// parseBody returns the body of a message cut off after its first parts, as
+// Markdown: its text/html part, or else its text/plain one.
 func parseBody(raw []byte) (text string, listUnsub bool) {
 	mr, err := mail.CreateReader(bytes.NewReader(raw))
 	if err != nil && !message.IsUnknownCharset(err) || mr == nil {
@@ -368,10 +368,11 @@ func parseBody(raw []byte) (text string, listUnsub bool) {
 			}
 		}
 	}
-	if strings.TrimSpace(plain) != "" {
-		return strings.TrimSpace(plain), listUnsub
+	// The HTML part has the pictures and the links behind words.
+	if md := htmlMarkdown(markup); md != "" {
+		return md, listUnsub
 	}
-	return htmlText(markup), listUnsub
+	return textMarkdown(plain), listUnsub
 }
 
 var (

@@ -51,7 +51,7 @@ func TestPages(t *testing.T) {
 	if err := tt.Click("设计评审改到周四 15:00"); err != nil {
 		t.Fatal(err)
 	}
-	if !a.hasCur || !tt.HasText("周四下午三点可以吗？会议室已订好。") {
+	if !a.hasCur || !tt.HasText("议程在这里") {
 		t.Fatalf("message not opened: %q", tt.Texts())
 	}
 	tt.Advance(400e6)
@@ -131,4 +131,25 @@ func TestDark(t *testing.T) {
 	}
 	tt.Advance(600e6)
 	shot(t, tt, "7-dark-agent")
+}
+
+func TestSearchAndAccounts(t *testing.T) {
+	a := testApp(t)
+	tt := ui.NewTester(a.view, 1360, 900)
+	tt.Key(ui.Cmd, ui.KeyF)
+	tt.Type("设计评审")
+	tt.Advance(300e6)
+	if len(a.rows) == 0 || !tt.HasText("设计评审改到周四 15:00") {
+		t.Fatalf("search found nothing: %q", tt.Texts())
+	}
+	shot(t, tt, "8-search")
+
+	if err := tt.Click("阿里邮箱"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300e6)
+	if a.nav != "acct:aliyun:me@aliyun.com" {
+		t.Fatalf("account not chosen: %q", a.nav)
+	}
+	shot(t, tt, "9-account")
 }

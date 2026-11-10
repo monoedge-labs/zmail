@@ -338,3 +338,37 @@ func TestICloudFolders(t *testing.T) {
 		}
 	}
 }
+
+func TestBodyMarkdown(t *testing.T) {
+	md := htmlMarkdown(`<html><head><title>t</title></head><body>
+<div style="display:none;max-height:0">Preview text ͏ ­</div><p>A͏­B</p>
+<table><tr><td><img src="https://cdn.x.com/logo.png" alt="Logo"></td></tr>
+<tr><td><p>Hi *Lin*,<br>price $5</p>
+<p>See <a href="https://x.com/a b">the report</a> or <a href="https://x.com/r">https://x.com/r</a>.</p>
+<a href="https://x.com/buy"><div>Buy now</div></a>
+<a href="https://x.com/b"><img src="https://x.com/banner.png" alt="Banner"></a><a href="https://x.com/app">Open<img src="https://x.com/arrow.png"></a>
+<img src="https://t.x.com/open.gif" width="1" height="1"><img src="https://x.com/avatar.png" width="40"><img src="cid:part1"></td></tr></table></body></html>`)
+	for _, want := range []string{
+		"![Logo](https://cdn.x.com/logo.png)", `Hi \*Lin\*,  ` + "\n" + `price \$5`,
+		"[the report](https://x.com/a%20b)", "<https://x.com/r>", "[Buy now](https://x.com/buy)", "\n![Banner](https://x.com/banner.png)\n", "[Open](https://x.com/app)",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "Preview") || !strings.Contains(md, "AB") {
+		t.Errorf("hidden preheader kept, or invisible fill left:\n%s", md)
+	}
+	if strings.Contains(md, "open.gif") || strings.Contains(md, "avatar") || strings.Contains(md, "cid:") || strings.Contains(md, "\n    ") {
+		t.Errorf("tracking pixel, cid picture or code indent kept:\n%s", md)
+	}
+	if got := PlainText(md); !strings.Contains(got, "See the report or https://x.com/r.") || strings.Contains(got, "](") {
+		t.Errorf("plain text = %q", got)
+	}
+
+	text := textMarkdown("Hello_world\n- not a list\nhttps://x.com/a_b?c=1\n\nBye")
+	if !strings.Contains(text, `Hello\_world  `) || !strings.Contains(text, `\- not a list`) ||
+		!strings.Contains(text, "<https://x.com/a_b?c=1>") || !strings.Contains(text, "\n\nBye") {
+		t.Errorf("text markdown = %q", text)
+	}
+}

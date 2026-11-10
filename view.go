@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/lobehub/lobe-mygo/pkg/action"
 	"github.com/lobehub/lobe-mygo/pkg/display"
 	"github.com/lobehub/lobe-mygo/pkg/field"
+	"github.com/lobehub/lobe-mygo/pkg/markdown"
 	"github.com/lobehub/lobe-mygo/pkg/overlay"
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 
@@ -139,7 +142,7 @@ func (a *app) sidebar(c *ui.Context, p pal) {
 	top := max(c.TitleBar().Height+4, 16)
 	ui.Column(c).Width(216).Padding(top, 12, 16).Gap(18).DragWindow().Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Padding(0, 4, 0, 12).Children(func() {
-			ui.Icon(c, icoWind).Size(20, 20).TextColor(p.blue)
+			ui.Image(c, logo).Size(28, 28).Label("Zmail")
 			ui.Text(c, "Zmail").FontSize(18).FontWeight(600).TextColor(p.ink).Grow(1)
 			add := ui.ButtonBase(c).Size(40, 40).Radius(14).Background(p.blue).
 				Shadow(0, 6, 16, 0, p.blue.Alpha(.35)).Label("添加账户").Tooltip("添加账户  ⌘N")
@@ -152,15 +155,15 @@ func (a *app) sidebar(c *ui.Context, p pal) {
 		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Column(c).Gap(18).Children(func() {
 				ui.Column(c).Gap(2).Children(func() {
-					a.navItem(c, p, "mail:inbox", icoInbox, "", "收件箱", a.total, true)
-					a.navItem(c, p, "mail:sent", icoSent, "", "已发送", 0, false)
-					a.navItem(c, p, "mail:archive", icoArchive, "", "归档", 0, false)
+					a.navItem(c, p, "mail:inbox", icoInbox, ui.Color{}, "收件箱", a.total, true)
+					a.navItem(c, p, "mail:sent", icoSent, ui.Color{}, "已发送", 0, false)
+					a.navItem(c, p, "mail:archive", icoArchive, ui.Color{}, "归档", 0, false)
 				})
 				if len(a.folders) > 0 {
 					ui.Column(c).Gap(2).Children(func() {
 						heading(c, p, "文件夹")
 						for _, f := range a.folders {
-							a.navItem(c, p, "folder:"+f, icoFolder, "", f, 0, false)
+							a.navItem(c, p, "folder:"+f, icoFolder, ui.Color{}, f, 0, false)
 						}
 					})
 				}
@@ -172,12 +175,16 @@ func (a *app) sidebar(c *ui.Context, p pal) {
 						}
 					})
 					for _, acc := range a.accounts {
-						a.navItem(c, p, "acct:"+acc.ID, nil, initial(a.acctByID(acc.ID)), a.acctByID(acc.ID), a.unread[acc.ID], false)
+						b, ok := brands[acc.Provider]
+						if !ok {
+							b.icon = icoMail
+						}
+						a.navItem(c, p, "acct:"+acc.ID, b.icon, b.color, a.acctByID(acc.ID), a.unread[acc.ID], false)
 					}
 				})
 				ui.Column(c).Gap(2).Padding(14, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(p.hair).Children(func() {
-					a.navItem(c, p, "page:stats", icoChart, "", "统计", 0, false)
-					a.navItem(c, p, "page:agent", icoAgent, "", "Agent 接入", 0, false)
+					a.navItem(c, p, "page:stats", icoChart, ui.Color{}, "统计", 0, false)
+					a.navItem(c, p, "page:agent", icoAgent, ui.Color{}, "Agent 接入", 0, false)
 				})
 			})
 		})
@@ -201,22 +208,20 @@ func heading(c *ui.Context, p pal, s string) ui.Element {
 	return ui.Text(c, s).FontSize(12).FontWeight(600).TextColor(p.muted).LetterSpacing(0.5).Padding(0, 12, 4)
 }
 
-func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tile, label string, count int, hot bool) {
+// navItem is a row of the sidebar; tint, when set, is its icon's own color,
+// as a mail service's mark keeps.
+func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tint ui.Color, label string, count int, hot bool) {
 	sel := a.nav == id
-	b := ui.ButtonBase(c).FillWidth().MinHeight(44).Padding(0, 12).Gap(10).Radius(12).Justify(ui.Start).Label(label)
+	b := ui.ButtonBase(c).FillWidth().MinHeight(44).Padding(0, 12).Gap(10).Radius(12).Justify(ui.Start).Label(label).Key(id)
 	b.Children(func() {
-		if ic != nil {
-			col := p.nav
-			if sel {
-				col = p.blue
-			}
-			ui.Icon(c, ic).Size(18, 18).TextColor(col)
+		col := p.nav
+		switch {
+		case tint != ui.Color{}:
+			col = tint
+		case sel:
+			col = p.blue
 		}
-		if tile != "" {
-			ui.Box(c).Size(20, 20).Radius(6).Background(p.tile).Center().Children(func() {
-				ui.Text(c, tile).FontSize(11).FontWeight(600).TextColor(p.nav)
-			})
-		}
+		ui.Icon(c, ic).Size(18, 18).TextColor(col)
 		w, col := 500, p.nav
 		if sel {
 			w, col = 600, p.ink
@@ -231,7 +236,7 @@ func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tile, label s
 	})
 	switch {
 	case sel:
-		b.Background(p.selRow).Shadow(0, 1, 3, 0, ui.RGBA(46, 58, 110, .14))
+		b.Background(p.blue.Alpha(.16))
 	case b.Hovered():
 		b.Background(p.hover)
 	}
@@ -284,9 +289,8 @@ func (a *app) title() string {
 	return "收件箱"
 }
 
-func (a *app) listPane(c *ui.Context, p pal) {
-	var people, notes, news []int
-	unread := 0
+// groups splits the rows by category, and counts the unread ones.
+func (a *app) groups() (people, notes, news []int, unread int) {
 	for i, m := range a.rows {
 		switch m.Category {
 		case store.CatNotification:
@@ -300,7 +304,11 @@ func (a *app) listPane(c *ui.Context, p pal) {
 			unread++
 		}
 	}
+	return
+}
 
+func (a *app) listPane(c *ui.Context, p pal) {
+	_, _, _, unread := a.groups()
 	ui.Column(c).Basis(340).Grow(1).MinWidth(0).Gap(16).Padding(16, 12).Radius(16).
 		Background(p.listBg).Border(1, p.listEdge).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Padding(0, 8).DragWindow().Children(func() {
@@ -320,6 +328,8 @@ func (a *app) listPane(c *ui.Context, p pal) {
 			ui.Text(c, a.notice).FontSize(12).TextColor(p.danger)
 		}
 
+		// The search above may have reloaded the rows: group them after it.
+		people, notes, news, _ := a.groups()
 		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Column(c).Gap(16).Children(func() {
 				if len(a.rows) == 0 {
@@ -499,6 +509,27 @@ func (a *app) toolbar(c *ui.Context, p pal) {
 	})
 }
 
+var imageClient = &http.Client{Timeout: 20 * time.Second}
+
+// loadImage fetches a picture of a message from the web, as a mail app
+// does: its sender can tell when it is opened.
+// ponytail: no cache across launches; add one when reopening mail is slow.
+func loadImage(url string) (ui.ImageSource, error) {
+	res, err := imageClient.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: %s", url, res.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, 10<<20))
+	if err != nil {
+		return nil, err
+	}
+	return ui.DecodeImage(b)
+}
+
 func (a *app) message(c *ui.Context, p pal, m store.Message) {
 	ui.Column(c).Gap(20).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
@@ -508,10 +539,8 @@ func (a *app) message(c *ui.Context, p pal, m store.Message) {
 				muted(c, p, fmt.Sprintf("%s · %s · %s", m.FromAddr, a.acctByID(m.AccountID), whenLong(m.Date)))
 			})
 		})
-		ui.Column(c).Gap(12).MaxWidth(640).Children(func() {
-			for _, para := range strings.Split(strings.TrimSpace(m.Body), "\n\n") {
-				ui.Text(c, strings.TrimSpace(para)).FontSize(15).LineHeight(1.7).TextColor(p.body).Selectable()
-			}
+		ui.Column(c).MaxWidth(680).Children(func() {
+			markdown.Markdown(c, m.Body, markdown.MarkdownProps{FontSize: 15, LineHeight: 1.7, HeaderMultiple: 0.4, MarginMultiple: 1.2, LoadImage: loadImage})
 		})
 		if m.HandledBy == store.ActorAgent && m.Seen {
 			ui.Row(c).AlignItems(ui.Center).Gap(8).MaxWidth(640).Padding(16, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(p.hair).Children(func() {

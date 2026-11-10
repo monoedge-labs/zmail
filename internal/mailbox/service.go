@@ -178,7 +178,7 @@ func (s *Service) syncFolder(a store.Account, r Remote, f Folder) error {
 		if err := s.Store.UpsertMessage(store.Message{
 			AccountID: a.ID, Folder: f.Name, Role: f.Role, UID: h.UID,
 			ThreadKey: ThreadKey(h.Subject), FromName: h.FromName, FromAddr: h.FromAddr,
-			Subject: h.Subject, Snippet: Snippet(h.Body, 140), Body: h.Body, Date: h.Date, Seen: h.Seen,
+			Subject: h.Subject, Snippet: Snippet(PlainText(h.Body), 140), Body: h.Body, Date: h.Date, Seen: h.Seen,
 			Category: Categorize(h.FromAddr, h.ListUnsub),
 		}); err != nil {
 			return err

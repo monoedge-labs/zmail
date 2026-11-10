@@ -149,6 +149,16 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	// Version 2 keeps bodies as Markdown. The messages are a copy of the
+	// server's, so older ones are dropped and synced again.
+	var version int
+	db.QueryRow(`PRAGMA user_version`).Scan(&version)
+	if version < 2 {
+		if _, err := db.Exec(`DELETE FROM messages; PRAGMA user_version = 2`); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	return &Store{db}, nil
 }
 

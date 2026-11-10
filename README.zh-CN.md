@@ -90,7 +90,7 @@ ZMAIL_IMAP_DEBUG=1 zmail sync         # 打印 IMAP 通信过程，不含凭据
 
 ## 隐私
 
-Zmail 运行在你的电脑上，不会把你的邮件发到任何地方。详见[隐私政策](https://zmail.zausau.com/zh-privacy.html)。
+Zmail 运行在你的电脑上，不会把你的邮件发到任何地方。打开邮件时，其中的图片会和其他邮件应用一样从网上加载，发件人因此能知道邮件被打开过。详见[隐私政策](https://zmail.zausau.com/zh-privacy.html)。
 
 ## 许可证
 

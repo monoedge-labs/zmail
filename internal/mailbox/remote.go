@@ -28,7 +28,7 @@ type Header struct {
 	FromAddr  string
 	Date      time.Time
 	Seen      bool
-	Body      string // the text part, cut to a few tens of KB
+	Body      string // as Markdown, cut to a few tens of KB
 	ListUnsub bool   // has a List-Unsubscribe header
 }
 

@@ -112,7 +112,9 @@ The UI is drawn natively with [MyGo](https://github.com/egoist/mygo) and
 
 ## Privacy
 
-Zmail runs on your computer and sends your mail nowhere. See the
+Zmail runs on your computer and sends your mail nowhere. When you open a
+message, its pictures load from the web as in other mail apps, so its sender
+can tell it was opened. See the
 [privacy policy](https://zmail.zausau.com/privacy.html).
 
 ## License

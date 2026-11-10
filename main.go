@@ -71,7 +71,7 @@ func main() {
 			// The window is the design's frosted sheet: the desktop shows
 			// through it, blurred.
 			Vibrancy: mygo.VibrancyUnderWindow,
-			Content:       ui.View(a.view),
+			Content:  ui.View(a.view),
 		})
 		if !*demo {
 			ctx, cancel := context.WithCancel(context.Background())
