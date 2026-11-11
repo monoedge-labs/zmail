@@ -13,6 +13,10 @@ func TestText(t *testing.T) {
 		{"call 13800138000 or +86 139-0000-0000x", "call ‹PHONE_1› or +86 139-0000-0000x"}, // the 2nd has dashes: not a bare mobile number
 		{"call 13800138000 or +8613900000000", "call ‹PHONE_1› or ‹PHONE_2›"},
 		{"order 913800138000 shipped", "order 913800138000 shipped"}, // inside a longer number
+		{"from 2001:db8::8a2e:370:7334, then fe80::1 and ::1.", "from ‹IP_1›, then ‹IP_2› and ‹IP_3›."},
+		{"2001:0db8:85a3:0000:0000:8a2e:0370:7334 / ::ffff:192.168.1.10", "‹IP_1› / ‹IP_2›"},
+		{"server 192.168.1.100, 10.0.0.1.", "server ‹IP_1›, ‹IP_2›."},
+		{"at 10:30:45, mac 00:1A:2B:3C:4D:5E, std::string, v1.2.3.4.5, 999.1.1.1", "at 10:30:45, mac 00:1A:2B:3C:4D:5E, std::string, v1.2.3.4.5, 999.1.1.1"}, // none is an address
 		{"id 11010519491231002X ok", "id ‹ID_1› ok"},
 		{"id 110105194912310021 ok", "id 110105194912310021 ok"}, // bad check digit
 		{"card 4111 1111 1111 1111.", "card ‹CARD_1›."},
@@ -164,7 +168,7 @@ func TestFake(t *testing.T) {
 		re string
 	}{
 		{Email, `^[a-z]+@[a-z]+\.com$`}, {Phone, `^1[3-9]\d{9}$`}, {Code, `^\d{6}$`}, {ID, `^\d{17}[\dX]$`},
-		{Salary, `^\d+,\d{3}\.\d{2}$`}, {Card, `^(\d{4} ){3}\d{4}$`},
+		{IP, `^[1-9]\d?\.\d{1,2}\.\d{1,2}\.[1-9]\d?$`}, {Salary, `^\d+,\d{3}\.\d{2}$`}, {Card, `^(\d{4} ){3}\d{4}$`},
 	} {
 		for n := 1; n < 20; n++ {
 			if !regexp.MustCompile(c.re).MatchString(Fake(c.k, n)) {

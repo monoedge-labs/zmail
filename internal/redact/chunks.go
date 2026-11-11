@@ -13,7 +13,7 @@ import (
 var labels = map[Kind]string{
 	Secret: "密钥", ID: "证件号", Email: "邮箱", Phone: "手机号", Card: "银行卡",
 	Code: "验证码", Password: "密码", Person: "姓名", Address: "地址", Account: "账号",
-	Salary: "薪资", Amount: "金额",
+	Salary: "薪资", Amount: "金额", IP: "IP 地址",
 }
 
 // Label names a kind to a reader.
@@ -54,6 +54,8 @@ func Fake(k Kind, n int) string {
 		return pick(digits, 4) + " " + pick(digits, 4) + " " + pick(digits, 4) + " " + pick(digits, 4)
 	case ID:
 		return pick(digits, 17) + pick("0123456789X", 1)
+	case IP:
+		return pick("123456789", 1) + pick(digits, next(2)) + "." + pick(digits, 1+next(2)) + "." + pick(digits, 1+next(2)) + "." + pick("123456789", 1) + pick(digits, next(2))
 	case Account:
 		return pick(digits, 10+next(4))
 	case Code:
