@@ -15,7 +15,7 @@ type Folder struct {
 	Role string // store.Role*, or RoleSkip for folders that are not synced
 }
 
-// RoleSkip marks folders that are never synced: trash, junk, drafts and
+// RoleSkip marks folders that are never synced: trash, drafts and
 // the virtual views some servers list.
 const RoleSkip = "skip"
 
@@ -29,6 +29,7 @@ type Header struct {
 	Date      time.Time
 	Seen      bool
 	Body      string // as Markdown, cut to a few tens of KB
+	HTML      string // the HTML part as it came, when there is one
 	ListUnsub bool   // has a List-Unsubscribe header
 }
 

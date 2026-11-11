@@ -19,6 +19,7 @@ const (
 	RoleSent    = "sent"
 	RoleArchive = "archive"
 	RoleOther   = "other"
+	RoleJunk    = "junk" // synced and shown, but left out of searches, threads and statistics
 )
 
 // Categories the inbox groups messages by.
@@ -52,7 +53,8 @@ type Message struct {
 	FromAddr  string
 	Subject   string
 	Snippet   string
-	Body      string
+	Body      string // as Markdown, which agents read
+	HTML      string // the original markup, which the window shows; read by Get and Thread only
 	Date      time.Time
 	Seen      bool
 	Category  string
@@ -87,6 +89,7 @@ type Stats struct {
 	Days                    []DayCount
 	AgentOps                map[string]int // tool name -> calls
 	AgentHandled, MeHandled int
+	AgentLast               time.Time // the agent's latest call, whatever the range
 }
 
 type SenderCount struct {
@@ -120,7 +123,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	thread_key TEXT NOT NULL, from_name TEXT NOT NULL, from_addr TEXT NOT NULL,
 	subject TEXT NOT NULL, snippet TEXT NOT NULL, body TEXT NOT NULL,
 	date INTEGER NOT NULL, seen INTEGER NOT NULL, category TEXT NOT NULL,
-	handled_by TEXT NOT NULL DEFAULT '',
+	handled_by TEXT NOT NULL DEFAULT '', html TEXT NOT NULL DEFAULT '',
 	UNIQUE (account_id, folder, uid)
 );
 CREATE INDEX IF NOT EXISTS messages_date ON messages (date DESC);
@@ -149,12 +152,16 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	// Version 2 keeps bodies as Markdown. The messages are a copy of the
-	// server's, so older ones are dropped and synced again.
+	// Version 3 keeps the HTML of a message beside its Markdown. The messages
+	// are a copy of the server's, so older ones are dropped and synced again.
 	var version int
 	db.QueryRow(`PRAGMA user_version`).Scan(&version)
-	if version < 2 {
-		if _, err := db.Exec(`DELETE FROM messages; PRAGMA user_version = 2`); err != nil {
+	if version < 3 {
+		if _, err := db.Exec(`DROP TABLE messages`); err != nil {
+			db.Close()
+			return nil, err
+		}
+		if _, err := db.Exec(schema + `PRAGMA user_version = 3`); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -249,28 +256,34 @@ func (s *Store) LastUID(accountID, folder string) uint32 {
 // known message keeps who handled it.
 func (s *Store) UpsertMessage(m Message) error {
 	_, err := s.db.Exec(`INSERT INTO messages
-		(account_id, folder, role, uid, thread_key, from_name, from_addr, subject, snippet, body, date, seen, category)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+		(account_id, folder, role, uid, thread_key, from_name, from_addr, subject, snippet, body, date, seen, category, html)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(account_id, folder, uid) DO UPDATE SET seen=excluded.seen, role=excluded.role`,
 		m.AccountID, m.Folder, m.Role, m.UID, m.ThreadKey, m.FromName, m.FromAddr, m.Subject,
-		m.Snippet, m.Body, m.Date.Unix(), b2i(m.Seen), m.Category)
+		m.Snippet, m.Body, m.Date.Unix(), b2i(m.Seen), m.Category, m.HTML)
 	return err
 }
 
 const cols = `id, account_id, folder, role, uid, thread_key, from_name, from_addr, subject, snippet, body, date, seen, category, handled_by`
+
+// listCols are cols for a list, whose messages leave their HTML out.
+const listCols = cols + `, ''`
+
+// fullCols are cols with the HTML.
+const fullCols = cols + `, html`
 
 func scan(r interface{ Scan(...any) error }) (Message, error) {
 	var m Message
 	var date int64
 	var seen int
 	err := r.Scan(&m.ID, &m.AccountID, &m.Folder, &m.Role, &m.UID, &m.ThreadKey, &m.FromName, &m.FromAddr,
-		&m.Subject, &m.Snippet, &m.Body, &date, &seen, &m.Category, &m.HandledBy)
+		&m.Subject, &m.Snippet, &m.Body, &date, &seen, &m.Category, &m.HandledBy, &m.HTML)
 	m.Date, m.Seen = time.Unix(date, 0), seen != 0
 	return m, err
 }
 
 func (s *Store) Get(id int64) (Message, error) {
-	return scan(s.db.QueryRow(`SELECT `+cols+` FROM messages WHERE id = ?`, id))
+	return scan(s.db.QueryRow(`SELECT `+fullCols+` FROM messages WHERE id = ?`, id))
 }
 
 // Search returns messages newest first. The body is left out unless the
@@ -302,7 +315,10 @@ func (s *Store) Search(q Query) ([]Message, error) {
 	if !q.Since.IsZero() {
 		add(`date >= ?`, q.Since.Unix())
 	}
-	sqlText := `SELECT ` + cols + ` FROM messages`
+	if q.Role == "" && q.Folder == "" { // junk is what one asks for by name
+		add(`role != 'junk'`)
+	}
+	sqlText := `SELECT ` + listCols + ` FROM messages`
 	if len(where) > 0 {
 		sqlText += ` WHERE ` + strings.Join(where, ` AND `)
 	}
@@ -334,7 +350,14 @@ func (s *Store) Thread(id int64) ([]Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT `+cols+` FROM messages WHERE account_id=? AND thread_key=? ORDER BY date`, m.AccountID, m.ThreadKey)
+	// Junk and the rest never share a thread: spam borrowing a real
+	// conversation's subject must not show up in it.
+	junk := 0
+	if m.Role == RoleJunk {
+		junk = 1
+	}
+	rows, err := s.db.Query(`SELECT `+fullCols+` FROM messages WHERE account_id=? AND thread_key=? AND (role='junk')=? ORDER BY date`,
+		m.AccountID, m.ThreadKey, junk)
 	if err != nil {
 		return nil, err
 	}
@@ -472,14 +495,14 @@ func (s *Store) Stats(since time.Time) (Stats, error) {
 		s.db.QueryRow(q, args...).Scan(&n)
 		return n
 	}
-	st.Received = one(`SELECT COUNT(*) FROM messages WHERE role!=? AND date>=?`, RoleSent, since.Unix())
+	st.Received = one(`SELECT COUNT(*) FROM messages WHERE role NOT IN (?, 'junk') AND date>=?`, RoleSent, since.Unix())
 	st.Sent = one(`SELECT COUNT(*) FROM messages WHERE role=? AND date>=?`, RoleSent, since.Unix())
 	st.Unread = one(`SELECT COUNT(*) FROM messages WHERE role=? AND seen=0`, RoleInbox)
-	st.AgentHandled = one(`SELECT COUNT(*) FROM messages WHERE role!=? AND date>=? AND handled_by=?`, RoleSent, since.Unix(), ActorAgent)
-	st.MeHandled = one(`SELECT COUNT(*) FROM messages WHERE role!=? AND date>=? AND handled_by=?`, RoleSent, since.Unix(), ActorMe)
+	st.AgentHandled = one(`SELECT COUNT(*) FROM messages WHERE role NOT IN (?, 'junk') AND date>=? AND handled_by=?`, RoleSent, since.Unix(), ActorAgent)
+	st.MeHandled = one(`SELECT COUNT(*) FROM messages WHERE role NOT IN (?, 'junk') AND date>=? AND handled_by=?`, RoleSent, since.Unix(), ActorMe)
 
 	rows, err := s.db.Query(`SELECT a.email, COUNT(*) FROM messages m JOIN accounts a ON a.id=m.account_id
-		WHERE m.role!=? AND m.date>=? GROUP BY a.email ORDER BY 2 DESC`, RoleSent, since.Unix())
+		WHERE m.role NOT IN (?, 'junk') AND m.date>=? GROUP BY a.email ORDER BY 2 DESC`, RoleSent, since.Unix())
 	if err != nil {
 		return st, err
 	}
@@ -491,7 +514,7 @@ func (s *Store) Stats(since time.Time) (Stats, error) {
 	}
 	rows.Close()
 
-	rows, err = s.db.Query(`SELECT from_name, from_addr, COUNT(*) FROM messages WHERE role!=? AND date>=?
+	rows, err = s.db.Query(`SELECT from_name, from_addr, COUNT(*) FROM messages WHERE role NOT IN (?, 'junk') AND date>=?
 		GROUP BY from_addr ORDER BY 3 DESC LIMIT 5`, RoleSent, since.Unix())
 	if err != nil {
 		return st, err
@@ -504,7 +527,7 @@ func (s *Store) Stats(since time.Time) (Stats, error) {
 	rows.Close()
 
 	rows, err = s.db.Query(`SELECT strftime('%Y-%m-%d', date, 'unixepoch', 'localtime') d, handled_by, COUNT(*)
-		FROM messages WHERE role!=? AND date>=? GROUP BY d, handled_by ORDER BY d`, RoleSent, since.Unix())
+		FROM messages WHERE role NOT IN (?, 'junk') AND date>=? GROUP BY d, handled_by ORDER BY d`, RoleSent, since.Unix())
 	if err != nil {
 		return st, err
 	}
@@ -541,6 +564,11 @@ func (s *Store) Stats(since time.Time) (Stats, error) {
 		st.AgentOps[t] = n
 	}
 	rows.Close()
+	var last sql.NullInt64
+	s.db.QueryRow(`SELECT MAX(ts) FROM ops WHERE actor=? AND ok=1`, ActorAgent).Scan(&last)
+	if last.Valid {
+		st.AgentLast = time.Unix(last.Int64, 0)
+	}
 	return st, nil
 }
 

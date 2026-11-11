@@ -111,3 +111,58 @@ func TestOps(t *testing.T) {
 		t.Errorf("clients = %v", c)
 	}
 }
+
+// A message keeps its markup for the window, which Get and Thread return and
+// a list leaves out.
+func TestHTMLKept(t *testing.T) {
+	s := seed(t)
+	if err := s.UpsertMessage(Message{AccountID: "g", Folder: "INBOX", Role: RoleInbox, UID: 4, ThreadKey: "news",
+		FromName: "N", FromAddr: "n@x.com", Subject: "Digest", Body: "hi", HTML: "<b>hi</b>", Date: time.Now(), Category: CatNewsletter}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := s.Search(Query{Category: CatNewsletter})
+	if len(list) != 1 || list[0].HTML != "" {
+		t.Fatalf("a list must leave the markup out: %+v", list)
+	}
+	m, err := s.Get(list[0].ID)
+	if err != nil || m.HTML != "<b>hi</b>" {
+		t.Fatalf("Get = %+v, %v", m, err)
+	}
+	if th, _ := s.Thread(m.ID); len(th) != 1 || th[0].HTML != "<b>hi</b>" {
+		t.Fatalf("Thread = %+v", th)
+	}
+}
+
+// Junk is stored and found by asking for it, and stays out of everything else.
+func TestJunkApart(t *testing.T) {
+	s := seed(t)
+	if err := s.SetFolder("g", "Junk", RoleJunk); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertMessage(Message{AccountID: "g", Folder: "Junk", Role: RoleJunk, UID: 1, ThreadKey: "review",
+		FromName: "Spam", FromAddr: "x@spam.biz", Subject: "Re: Design review", Body: "friday prize", Date: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Search(Query{Text: "friday"})
+	if len(got) != 1 || got[0].Role == RoleJunk {
+		t.Errorf("default search = %+v, want the inbox mail only", got)
+	}
+	got, _ = s.Search(Query{Role: RoleJunk})
+	if len(got) != 1 || got[0].FromAddr != "x@spam.biz" {
+		t.Errorf("junk search = %+v", got)
+	}
+	inbox, _ := s.Search(Query{Role: RoleInbox, Text: "Design review"})
+	th, _ := s.Thread(inbox[0].ID)
+	for _, m := range th {
+		if m.Role == RoleJunk {
+			t.Errorf("junk in a real thread: %+v", m)
+		}
+	}
+	th, _ = s.Thread(got[0].ID)
+	if len(th) != 1 || th[0].Role != RoleJunk {
+		t.Errorf("a junk thread = %+v, want the junk message alone", th)
+	}
+	if st, _ := s.Stats(time.Now().AddDate(0, 0, -1)); st.Received != 3 {
+		t.Errorf("received = %d, junk must not count", st.Received)
+	}
+}

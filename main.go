@@ -61,6 +61,9 @@ func main() {
 		svc = mailbox.New(st, keychain{})
 	}
 	a := newApp(st, svc)
+	if !*demo {
+		a.dir, a.priv = dir, loadPrivacy(dir)
+	}
 	svc.Changed = a.refresh
 
 	mygo.App.WhenReady(func() {
@@ -74,6 +77,10 @@ func main() {
 			Content:  ui.View(a.view),
 		})
 		if !*demo {
+			// What is hidden is read by the model off the main thread, which
+			// needs the window: so the mail is loaded now, not before it.
+			a.reload()
+			a.ensureModel()
 			ctx, cancel := context.WithCancel(context.Background())
 			a.win.OnClosed(cancel)
 			go func() { // accounts added by `zmail account add` appear without a restart

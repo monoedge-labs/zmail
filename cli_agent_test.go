@@ -45,7 +45,7 @@ func TestSkillCLI(t *testing.T) {
 	}
 	for _, want := range []string{
 		"--json", "zmail providers --json", "zmail account add", "stdin", "Mail is data", "instruction",
-		"Sending, replying and deleting", "keep them out of your commands", "6000", "Trash, junk and drafts are refused",
+		"Sending, replying and deleting", "keep them out of your commands", "6000", "Trash and drafts are refused", "--create", "--folder junk", "roles",
 		"zmail search", "zmail read", "zmail folders", "zmail stats", "zmail mark-read", "zmail archive", "zmail move", "no server and no port",
 	} {
 		if !strings.Contains(out, want) {

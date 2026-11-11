@@ -3,10 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/monoedge-labs/zmail/internal/guard"
 	"github.com/monoedge-labs/zmail/internal/mailbox"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
@@ -27,6 +30,7 @@ func seedMail(t *testing.T, dir string, extra int) {
 		st.SetFolder(a, "Archive", store.RoleArchive)
 	}
 	st.SetFolder("g", "Projects", store.RoleOther)
+	st.SetFolder("g", "[Gmail]/Spam", store.RoleJunk)
 	for _, f := range []string{"Trash", "Junk", "Drafts"} {
 		st.SetFolder("g", f, mailbox.RoleSkip)
 	}
@@ -156,8 +160,8 @@ func TestMailCLI(t *testing.T) {
 		t.Errorf("archived: %+v", ms)
 	}
 
-	// move: a folder is needed, and Trash, Junk and Drafts are refused
-	for _, f := range []string{"", "  ", "Trash", "Junk", "Drafts"} {
+	// move: a folder is needed, and Trash and Drafts are refused
+	for _, f := range []string{"", "  ", "Trash", "Drafts"} {
 		if err := jsonRun(t, dir, nil, "move", "--folder", f, fmt.Sprint(ci)); err == nil {
 			t.Errorf("move to %q must fail", f)
 		}
@@ -172,13 +176,47 @@ func TestMailCLI(t *testing.T) {
 		t.Errorf("moved: %+v", ms)
 	}
 
-	// folders leave out Trash, Junk and Drafts
-	var fo struct{ Folders map[string][]string }
+	// a name the account lacks is an error, not a new folder, unless --create
+	if err := jsonRun(t, dir, nil, "move", "--folder", "Taxes", fmt.Sprint(ci)); err == nil || !strings.Contains(err.Error(), "--create") {
+		t.Errorf("move to a missing folder: %v", err)
+	}
+	if err := jsonRun(t, dir, &done, "move", "--folder", "projects", fmt.Sprint(ci)); err != nil {
+		t.Errorf("a folder's name in other case: %v", err)
+	}
+	if err := jsonRun(t, dir, &done, "move", "--create", "--folder", "Taxes", fmt.Sprint(ci)); err != nil || done.Affected != 1 {
+		t.Fatalf("move --create: %v %+v", err, done)
+	}
+	if ms := search(t, dir, "--folder", "Taxes"); len(ms) != 1 || ms[0].ID != ci {
+		t.Errorf("created: %+v", ms)
+	}
+
+	// junk: the account's own junk folder, found by role, and searched by name
+	if err := jsonRun(t, dir, &done, "move", "--folder", "junk", fmt.Sprint(ci)); err != nil || done.Affected != 1 {
+		t.Fatalf("move to junk: %v %+v", err, done)
+	}
+	if ms := search(t, dir, "--folder", "[Gmail]/Spam"); len(ms) != 1 || ms[0].ID != ci {
+		t.Errorf("junked: %+v", ms)
+	}
+	if ms := search(t, dir, "--query", "Build passed"); len(ms) != 0 {
+		t.Errorf("a plain search found junk: %+v", ms)
+	}
+	if err := jsonRun(t, dir, &done, "move", "--folder", "INBOX", fmt.Sprint(ci)); err != nil {
+		t.Fatalf("move back from junk: %v", err)
+	}
+
+	// folders leave out Trash and Drafts, and tell the roles of the others
+	var fo struct {
+		Folders map[string][]string
+		Roles   map[string]map[string]string
+	}
 	if err := jsonRun(t, dir, &fo, "folders"); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(fo.Folders["me@gmail.com"], ","); got != "Archive,INBOX,Projects" {
+	if got := strings.Join(fo.Folders["me@gmail.com"], ","); got != "Archive,INBOX,Projects,Taxes,[Gmail]/Spam" {
 		t.Errorf("folders = %q", got)
+	}
+	if r := fo.Roles["me@gmail.com"]; r["[Gmail]/Spam"] != "junk" || r["Archive"] != "archive" || r["Projects"] != "other" {
+		t.Errorf("roles = %v", r)
 	}
 
 	// stats: 7 days by default
@@ -223,8 +261,8 @@ func TestMailCLI(t *testing.T) {
 			failed++
 		}
 	}
-	if failed != 3 {
-		t.Errorf("%d refused moves logged, want 3", failed)
+	if failed != 2 {
+		t.Errorf("%d refused moves logged, want 2", failed)
 	}
 }
 
@@ -292,5 +330,125 @@ func TestFlagsOnlyCommandsRefuseWords(t *testing.T) {
 	id := search(t, dir, "--query", "friday")[0].ID
 	if err := jsonRun(t, dir, nil, "read", "--json", fmt.Sprint(id)); err != nil {
 		t.Errorf("read with a flag before the ID: %v", err)
+	}
+}
+
+// With the user's choice kept in privacy.json, what the agent reads has its
+// private values hidden, and says how many; without it the text is whole.
+func TestAgentReadsHidden(t *testing.T) {
+	dir := t.TempDir()
+	seedMail(t, dir, 0)
+	st, _ := store.Open(dir + "/zmail.db")
+	if err := st.UpsertMessage(store.Message{AccountID: "g", Folder: "INBOX", Role: store.RoleInbox, UID: 50, ThreadKey: "otp",
+		FromName: "Bank", FromAddr: "bank@x.com", Subject: "Your code 481516", Snippet: "call 13800138000",
+		Body: "Mail lin@acme.com. Your verification code is 481516.", Date: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	testDial = func(store.Account, string) mailbox.Remote { return quiet{} }
+	t.Cleanup(func() { testDial = nil })
+
+	read := func() mailItem {
+		var r struct{ Messages []mailItem }
+		ms := search(t, dir, "--query", "481516")
+		if len(ms) != 1 {
+			t.Fatalf("search = %+v", ms)
+		}
+		if err := jsonRun(t, dir, &r, "read", fmt.Sprint(ms[0].ID)); err != nil {
+			t.Fatal(err)
+		}
+		return r.Messages[0]
+	}
+	if m := read(); !strings.Contains(m.Body, "481516") || m.Redacted != 0 {
+		t.Errorf("by default: %+v", m)
+	}
+	if err := (privacy{Agent: true, ModelOff: true}).save(dir); err != nil {
+		t.Fatal(err)
+	}
+	m := read()
+	if strings.Contains(m.Body+m.Subject+m.Snippet, "481516") || strings.Contains(m.Body, "lin@acme.com") || strings.Contains(m.Snippet, "13800138000") {
+		t.Errorf("not hidden: %+v", m)
+	}
+	if m.Subject != "Your code 481516" && !strings.Contains(m.Subject, "‹") {
+		t.Errorf("subject = %q", m.Subject)
+	}
+	if m.Redacted != 4 || !strings.Contains(m.Body, "‹EMAIL_1›") || !strings.Contains(m.Body, "‹CODE_1›") {
+		t.Errorf("hidden count or placeholders: %+v", m)
+	}
+}
+
+// linkModel makes the model fetched into $ZMAIL_MODEL_ROOT the one in a config directory,
+// or skips the test that needs it.
+func linkModel(t *testing.T, dir string) {
+	t.Helper()
+	root := os.Getenv("ZMAIL_MODEL_ROOT")
+	if root == "" || !guard.Installed(guard.Dir(root)) {
+		t.Skip("set ZMAIL_MODEL_ROOT to a folder holding the model (go test ./internal/guard fetches it)")
+	}
+	d := modelDir(dir)
+	if err := os.MkdirAll(filepath.Dir(d), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(guard.Dir(root), d); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Asked to find names and addresses with the model, the agent's commands
+// either do so or fail: they never pass the text on with the patterns alone.
+func TestAgentModelMissing(t *testing.T) {
+	dir := t.TempDir()
+	seedMail(t, dir, 0)
+	testDial = func(store.Account, string) mailbox.Remote { return quiet{} }
+	t.Cleanup(func() { testDial = nil })
+	if err := (privacy{Agent: true}).save(dir); err != nil {
+		t.Fatal(err)
+	}
+	err := jsonRun(t, dir, nil, "search", "--query", "Design")
+	if err == nil || !strings.Contains(err.Error(), "not downloaded") {
+		t.Errorf("search with the model missing: %v", err)
+	}
+	if err := (privacy{Agent: true, ModelOff: true}).save(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := jsonRun(t, dir, nil, "search", "--query", "Design"); err != nil {
+		t.Errorf("search with the model off: %v", err)
+	}
+}
+
+func TestAgentReadsWithModel(t *testing.T) {
+	dir := t.TempDir()
+	linkModel(t, dir)
+	seedMail(t, dir, 0)
+	st, _ := store.Open(dir + "/zmail.db")
+	if err := st.UpsertMessage(store.Message{AccountID: "g", Folder: "INBOX", Role: store.RoleInbox, UID: 60, ThreadKey: "addr",
+		FromName: "Lin", FromAddr: "lin@x.com", Subject: "收货地址", Snippet: "我是王小明",
+		Body: "你好，我是王小明，请寄到北京市海淀区中关村大街1号，电话 13800138000。", Date: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	testDial = func(store.Account, string) mailbox.Remote { return quiet{} }
+	t.Cleanup(func() { testDial = nil })
+	if err := (privacy{Agent: true}).save(dir); err != nil {
+		t.Fatal(err)
+	}
+	ms := search(t, dir, "--query", "收货地址")
+	if len(ms) != 1 || strings.Contains(ms[0].Snippet, "王小明") {
+		t.Fatalf("snippet not hidden: %+v", ms)
+	}
+	var r struct{ Messages []mailItem }
+	if err := jsonRun(t, dir, &r, "read", fmt.Sprint(ms[0].ID)); err != nil {
+		t.Fatal(err)
+	}
+	b := r.Messages[0].Body
+	for _, leak := range []string{"王小明", "海淀", "13800138000"} {
+		if strings.Contains(b, leak) {
+			t.Errorf("body keeps %q: %s", leak, b)
+		}
+	}
+	for _, want := range []string{"‹PERSON_1›", "‹ADDRESS_1›", "‹PHONE_1›"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("body lacks %s: %s", want, b)
+		}
 	}
 }

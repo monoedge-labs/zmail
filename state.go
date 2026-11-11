@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -8,7 +9,9 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/monoedge-labs/zmail/internal/guard"
 	"github.com/monoedge-labs/zmail/internal/mailbox"
+	"github.com/monoedge-labs/zmail/internal/redact"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
@@ -17,6 +20,14 @@ type app struct {
 	win *mygo.Window
 	st  *store.Store
 	svc *mailbox.Service
+
+	dir  string  // where privacy.json lives; empty keeps the choice in memory
+	priv privacy // what is hidden: the window's choice is View, the agent's is Agent
+	vm   *viewModel
+	dl   download
+
+	hidden int  // values hidden in the thread shown, of each message as its own count
+	hiding bool // the model has yet to read some of it
 
 	router *ui.Router
 	nav    string // the sidebar's choice
@@ -31,6 +42,8 @@ type app struct {
 	cur         store.Message // the message shown, valid while hasCur
 	hasCur      bool
 	thread      []store.Message
+	pages       map[int64]*mailPage // web views of the thread's messages with HTML
+	face        *agentFace          // the agent's face on the statistics page
 	moveOpen    bool
 	newsOpen    bool
 	focusSearch bool
@@ -70,8 +83,9 @@ func newApp(st *store.Store, svc *mailbox.Service) *app {
 	a := &app{
 		st: st, svc: svc,
 		router: ui.NewRouter("/mail"), nav: "mail:inbox", sel: -1, listW: 380,
-		unread: map[string]int{},
+		unread: map[string]int{}, pages: map[int64]*mailPage{},
 	}
+	a.vm = &viewModel{dir: a.modelFiles, done: a.refresh, windowed: func() bool { return a.win != nil }}
 	a.router.Animation = &ui.Snappy
 	a.list.Selected = &a.sel
 	a.list.Key = func(i int) any { return a.rows[i].ID }
@@ -130,6 +144,8 @@ func (a *app) reload() {
 		q.Role = store.RoleSent
 	case a.nav == "mail:archive":
 		q.Role = store.RoleArchive
+	case a.nav == "mail:junk":
+		q.Role = store.RoleJunk
 	case strings.HasPrefix(a.nav, "folder:"):
 		q.Folder = strings.TrimPrefix(a.nav, "folder:")
 	case strings.HasPrefix(a.nav, "acct:"):
@@ -138,6 +154,7 @@ func (a *app) reload() {
 		q.Role = store.RoleInbox
 	}
 	a.rows, _ = a.st.Search(q)
+	a.maskAll(a.rows)
 
 	// Keep the message shown chosen where it now is.
 	a.sel = -1
@@ -148,14 +165,116 @@ func (a *app) reload() {
 			}
 		}
 		if m, err := a.st.Get(a.cur.ID); err == nil {
+			a.mask(&m)
 			a.cur = m
 			a.thread, _ = a.st.Thread(m.ID)
+			a.hidden, a.hiding = a.maskAll(a.thread)
 		} else {
 			a.hasCur, a.thread = false, nil
 		}
 	}
 
+	a.syncPages()
+
 	a.stats, _ = a.st.Stats(time.Now().AddDate(0, 0, -rangeDays[a.range_]))
+	a.syncFace()
+}
+
+// mask hides the private values in the texts of m, when the window is set
+// to. A message is masked on its way from the store, so every page, the list
+// and the web views alike, shows it hidden. With the local model on, the
+// model reads the texts in the background: until it has, a message shows as
+// "…" or a notice, never as the text.
+func (a *app) mask(m *store.Message) (hidden int, pending bool) {
+	if !a.priv.View {
+		return 0, false
+	}
+	h := redact.New()
+	if a.useModel() {
+		h.Model = a.vm.find
+	}
+	t := h.Texts(m.Subject, m.Snippet)
+	m.Subject, m.Snippet = t[0], t[1]
+	if m.HTML != "" {
+		// The page is what is shown, and read first (the model reads the
+		// newest ask first); the Markdown body shows only where the page
+		// cannot be made, and has its own reading, which waits for none.
+		b := redact.New()
+		b.Model = h.Model
+		m.Body = b.Text(m.Body)
+		if b.Pending {
+			m.Body = "正在识别敏感信息…"
+		}
+		m.HTML = h.HTML(m.HTML)
+	} else {
+		m.Body = h.Text(m.Body)
+	}
+	if !h.Pending {
+		return h.Distinct(), false
+	}
+	m.Subject, m.Snippet, m.Body, m.HTML = "…", "", "正在识别敏感信息…", ""
+	return 0, true
+}
+
+// useModel says whether the local model reads what is hidden now: it is on,
+// its files are here and it has not failed. Until then the patterns hide
+// what they can, and maskNote says what is left.
+func (a *app) useModel() bool {
+	return a.priv.model() && guard.Installed(a.modelFiles()) && a.vm.failure() == ""
+}
+
+// maskNote says how far hiding has got when it falls short of the model's, and
+// offers what would mend it ("" for none).
+func (a *app) maskNote() (note, act string) {
+	switch {
+	case a.useModel():
+		return "", ""
+	case !a.priv.model():
+		return "本地识别模型已关闭：姓名和地址没有隐藏", "开启"
+	case a.dl.busy:
+		pct := int64(0)
+		if a.dl.total > 0 {
+			pct = a.dl.done * 100 / a.dl.total
+		}
+		return fmt.Sprintf("正在下载识别模型 %d%%，完成后会隐藏姓名和地址", pct), ""
+	case a.dl.err != "":
+		return "识别模型下载失败：" + a.dl.err, "重试"
+	case a.vm.failure() != "":
+		return a.vm.failure(), "重试"
+	}
+	return "识别模型还没有下载：姓名和地址没有隐藏", "下载"
+}
+
+// maskAll masks messages, newest asked last, and counts what it hid.
+func (a *app) maskAll(ms []store.Message) (hidden int, pending bool) {
+	for i := len(ms) - 1; i >= 0; i-- {
+		n, w := a.mask(&ms[i])
+		hidden, pending = hidden+n, pending || w
+	}
+	return hidden, pending
+}
+
+// setPrivacy applies and keeps a change of what is hidden. The web views are
+// made again: their pages hold the old text.
+func (a *app) setPrivacy(p privacy) {
+	if p == a.priv {
+		return
+	}
+	viewChanged := p.View != a.priv.View || p.ModelOff != a.priv.ModelOff
+	a.priv = p
+	a.ensureModel()
+	if a.dir != "" {
+		if err := p.save(a.dir); err != nil {
+			a.notice = err.Error()
+		}
+	}
+	if viewChanged {
+		for id, pg := range a.pages {
+			pg.view.Destroy()
+			delete(a.pages, id)
+		}
+		a.reload()
+	}
 }
 
 // navigate follows the sidebar's choice.
@@ -181,6 +300,8 @@ func (a *app) open(i int) {
 	}
 	a.cur, a.hasCur = a.rows[i], true
 	a.thread, _ = a.st.Thread(a.cur.ID)
+	a.hidden, a.hiding = a.maskAll(a.thread)
+	a.syncPages()
 	if !a.cur.Seen {
 		id := a.cur.ID
 		a.async(func() error { return a.svc.MarkRead(mailbox.UI, []int64{id}, true) })

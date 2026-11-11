@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monoedge-labs/zmail/internal/guard"
 	"github.com/monoedge-labs/zmail/internal/mailbox"
+	"github.com/monoedge-labs/zmail/internal/redact"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
@@ -37,6 +39,7 @@ type mailItem struct {
 	Unread   bool   `json:"unread"`
 	Category string `json:"category"`
 	Body     string `json:"body,omitempty"`
+	Redacted int    `json:"redacted,omitempty"` // values hidden in this message, when the user asked for that
 }
 
 type senderItem struct {
@@ -95,12 +98,12 @@ func parseIDs(words []string, one bool) ([]int64, error) {
 	return ids, nil
 }
 
-func cliMail(svc *mailbox.Service, args []string, out io.Writer) error {
+func cliMail(svc *mailbox.Service, priv privacy, dir string, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print JSON")
 	var (
 		query, account, folder, category *string
-		unread                           *bool
+		unread, create                   *bool
 		sinceDays, limit, days           *int
 	)
 	switch args[0] {
@@ -115,7 +118,8 @@ func cliMail(svc *mailbox.Service, args []string, out io.Writer) error {
 	case "mark-read":
 		unread = fs.Bool("unread", false, "mark unread instead")
 	case "move":
-		folder = fs.String("folder", "", "the destination folder; created when missing")
+		folder = fs.String("folder", "", "the destination: a name from folders, or junk for the account's junk folder")
+		create = fs.Bool("create", false, "make the folder when the account has none of that name")
 	}
 	words, err := parseFlags(fs, args[1:])
 	if err != nil {
@@ -178,7 +182,11 @@ func cliMail(svc *mailbox.Service, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		items := mailItems(ms, byID, false)
+		hide, err := hider(priv, dir)
+		if err != nil {
+			return err
+		}
+		items := mailItems(ms, byID, false, hide)
 		return show(map[string]any{"messages": items}, mailLines(items, false))
 
 	case "read":
@@ -191,30 +199,43 @@ func cliMail(svc *mailbox.Service, args []string, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("message %d: %w", ids[0], err)
 		}
-		items := mailItems(ms, emails(), true)
+		hide, err := hider(priv, dir)
+		if err != nil {
+			return err
+		}
+		items := mailItems(ms, emails(), true, hide)
 		return show(map[string]any{"subject": ms[0].Subject, "messages": items}, mailLines(items, true))
 
 	case "folders":
 		accs, err := st.Accounts()
 		out := map[string][]string{}
+		roles := map[string]map[string]string{}
 		var lines []string
 		for _, a := range accs {
 			fs, _ := st.Folders(a.ID)
-			names := []string{}
+			names, label := []string{}, []string{}
+			roles[a.Email] = map[string]string{}
 			for name, role := range fs {
 				if role != mailbox.RoleSkip {
 					names = append(names, name)
+					roles[a.Email][name] = role
 				}
 			}
 			slices.Sort(names)
+			for _, name := range names {
+				if r := roles[a.Email][name]; r != store.RoleOther {
+					name += " (" + r + ")"
+				}
+				label = append(label, name)
+			}
 			out[a.Email] = names
-			lines = append(lines, a.Email+": "+strings.Join(names, ", "))
+			lines = append(lines, a.Email+": "+strings.Join(label, ", "))
 		}
 		logRead("list_folders", err)
 		if err != nil {
 			return err
 		}
-		return show(map[string]any{"folders": out}, strings.Join(lines, "\n"))
+		return show(map[string]any{"folders": out, "roles": roles}, strings.Join(lines, "\n"))
 
 	case "stats":
 		d := *days
@@ -277,25 +298,131 @@ func cliMail(svc *mailbox.Service, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if err := svc.MoveToFolder(cliWho, ids, *folder); err != nil {
-			return err
+		// One account's mail goes to that account's folder: a name means a
+		// folder the account has, unless --create says to make one.
+		var accs []string
+		byAcc := map[string][]int64{}
+		for _, id := range ids {
+			m, err := st.Get(id)
+			if err != nil {
+				return fmt.Errorf("message %d: %w", id, err)
+			}
+			if _, ok := byAcc[m.AccountID]; !ok {
+				accs = append(accs, m.AccountID)
+			}
+			byAcc[m.AccountID] = append(byAcc[m.AccountID], id)
+		}
+		dest := map[string]string{}
+		for _, acc := range accs {
+			if dest[acc], err = resolveFolder(st, acc, strings.TrimSpace(*folder), *create); err != nil {
+				return err
+			}
+		}
+		for _, acc := range accs {
+			if err := svc.MoveToFolder(cliWho, byAcc[acc], dest[acc]); err != nil {
+				return err
+			}
 		}
 		return done(len(ids), "moved")
 	}
 	return nil
 }
 
-func mailItems(ms []store.Message, accounts map[string]string, withBody bool) []mailItem {
+// resolveFolder names the folder of an account that a move to name means:
+// the one with that name, in any case, or for "junk" or "spam" the account's
+// junk folder, whatever its server calls it. A folder the account lacks is
+// an error, as a typo must not make one, unless create is set.
+func resolveFolder(st *store.Store, acc, name string, create bool) (string, error) {
+	fs, err := st.Folders(acc)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for f, role := range fs {
+		if role == mailbox.RoleSkip {
+			continue
+		}
+		names = append(names, f)
+		if strings.EqualFold(f, name) {
+			return f, nil
+		}
+	}
+	if l := strings.ToLower(name); l == "junk" || l == "spam" {
+		for _, f := range names {
+			if fs[f] == store.RoleJunk {
+				return f, nil
+			}
+		}
+	}
+	if _, ok := fs[name]; ok { // Trash, drafts: the service refuses them
+		return name, nil
+	}
+	if create {
+		return name, nil
+	}
+	slices.Sort(names)
+	return "", fmt.Errorf("no folder %q: choose one of %s, or add --create to make it", name, strings.Join(names, ", "))
+}
+
+// hider is the masker for what the agent reads, nil when the user hides
+// nothing. With the local model turned on it reads with the model too, and a
+// model that is missing or fails to load is an error: the user asked for
+// more than the patterns, and gets none of it silently.
+func hider(p privacy, dir string) (*redact.Masker, error) {
+	if !p.Agent {
+		return nil, nil
+	}
+	m := redact.New()
+	if p.model() {
+		d := modelDir(dir)
+		if !guard.Installed(d) {
+			return nil, errors.New("the masking model is not downloaded yet (opening Zmail starts it, on the statistics page): wait for it, or turn the model off there")
+		}
+		g, err := guard.Load(d)
+		if err != nil {
+			return nil, fmt.Errorf("the masking model did not load: %w", err)
+		}
+		m.Model = redact.FromGuard(g)
+	}
+	return m, nil
+}
+
+// maskMargin is how much past the cut of a body is hidden too, so that a
+// value the cut runs through is hidden whole before it is cut.
+const maskMargin = 256
+
+// mailItems describes messages for the agent. With a masker, the subject,
+// snippet and body come with their private values hidden, before the body is
+// cut; the sender stays, as the agent needs it to tell mail apart.
+func mailItems(ms []store.Message, accounts map[string]string, withBody bool, hide *redact.Masker) []mailItem {
 	out := make([]mailItem, 0, len(ms))
 	for _, m := range ms {
 		from := m.FromAddr
 		if m.FromName != "" {
 			from = fmt.Sprintf("%s <%s>", m.FromName, m.FromAddr)
 		}
+		before, cut := 0, false
+		body := m.Body
+		if hide != nil {
+			before = hide.Hidden
+			if !withBody {
+				body = ""
+			} else if r := []rune(body); len(r) > bodyRunes+maskMargin {
+				body, cut = string(r[:bodyRunes+maskMargin]), true
+			}
+			t := hide.Texts(m.Subject, m.Snippet, body)
+			m.Subject, m.Snippet, body = t[0], t[1], t[2]
+		}
 		it := mailItem{ID: m.ID, Account: accounts[m.AccountID], Folder: m.Folder, From: from, Subject: m.Subject,
 			Snippet: m.Snippet, Date: m.Date.Format(time.RFC3339), Unread: !m.Seen, Category: m.Category}
 		if withBody {
-			it.Body = truncate(m.Body, bodyRunes)
+			it.Body = truncate(body, bodyRunes)
+			if cut && !strings.HasSuffix(it.Body, "[cut]") {
+				it.Body += "\n[cut]"
+			}
+		}
+		if hide != nil {
+			it.Redacted = hide.Hidden - before
 		}
 		out = append(out, it)
 	}

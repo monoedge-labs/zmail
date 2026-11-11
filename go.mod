@@ -5,6 +5,7 @@ go 1.27.3
 tool github.com/egoist/mygo/cmd/mygo
 
 require (
+	github.com/clipperhouse/uax29/v2 v2.5.0
 	github.com/egoist/mygo v0.8.4-0.20261108082913-9233663736ca
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-message v0.18.2
@@ -17,6 +18,7 @@ require (
 )
 
 require (
+	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect

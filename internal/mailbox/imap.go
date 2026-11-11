@@ -18,6 +18,8 @@ import (
 	"github.com/emersion/go-message"
 	_ "github.com/emersion/go-message/charset" // GBK, GB18030 and the other legacy charsets of Chinese mail
 	"github.com/emersion/go-message/mail"
+
+	"github.com/monoedge-labs/zmail/internal/store"
 )
 
 const maxFetchedBody = 128 << 10 // bytes of each message read from the server
@@ -165,8 +167,10 @@ func folderRole(name string, attrs []imap.MailboxAttr) string {
 	}
 	for _, a := range attrs {
 		switch a {
+		case imap.MailboxAttrJunk:
+			return store.RoleJunk
 		case imap.MailboxAttrNoSelect, imap.MailboxAttrNonExistent,
-			imap.MailboxAttrTrash, imap.MailboxAttrJunk, imap.MailboxAttrDrafts,
+			imap.MailboxAttrTrash, imap.MailboxAttrDrafts,
 			imap.MailboxAttrFlagged, imap.MailboxAttrImportant:
 			return RoleSkip
 		case imap.MailboxAttrSent:
@@ -185,7 +189,9 @@ func folderRole(name string, attrs []imap.MailboxAttr) string {
 		return false
 	}
 	switch {
-	case has("draft", "草稿", "trash", "deleted", "已删除", "废纸篓", "junk", "spam", "垃圾"):
+	case has("junk", "spam", "垃圾"):
+		return store.RoleJunk
+	case has("draft", "草稿", "trash", "deleted", "已删除", "废纸篓"):
 		return RoleSkip
 	case has("sent", "已发送"):
 		return "sent"
@@ -242,7 +248,10 @@ func (r *IMAP) Fetch(folder string, afterUID uint32, limit int) (out []Header, e
 				}
 			}
 			if len(m.BodySection) > 0 {
-				h.Body, h.ListUnsub = parseBody(m.BodySection[0].Bytes)
+				h.Body, h.HTML, h.ListUnsub = parseBody(m.BodySection[0].Bytes)
+				if hasCID(h.HTML) {
+					h.HTML = inlineImages(c, m.UID, h.HTML)
+				}
 			}
 			out = append(out, h)
 		}
@@ -338,14 +347,15 @@ func (r *IMAP) Move(folder string, uids []uint32, dest string) (mapped map[uint3
 }
 
 // parseBody returns the body of a message cut off after its first parts, as
-// Markdown: its text/html part, or else its text/plain one.
-func parseBody(raw []byte) (text string, listUnsub bool) {
+// Markdown: its text/html part, or else its text/plain one. The HTML part
+// comes too, as it is, when there is one.
+func parseBody(raw []byte) (text, markup string, listUnsub bool) {
 	mr, err := mail.CreateReader(bytes.NewReader(raw))
 	if err != nil && !message.IsUnknownCharset(err) || mr == nil {
-		return "", false
+		return "", "", false
 	}
 	listUnsub = mr.Header.Get("List-Unsubscribe") != ""
-	var plain, markup string
+	var plain string
 	for {
 		p, err := mr.NextPart()
 		if err != nil { // io.EOF, or the cut message's end
@@ -356,7 +366,7 @@ func parseBody(raw []byte) (text string, listUnsub bool) {
 			continue
 		}
 		ct, _, _ := h.ContentType()
-		b, _ := io.ReadAll(io.LimitReader(p.Body, 64<<10))
+		b, _ := io.ReadAll(io.LimitReader(p.Body, maxFetchedBody))
 		switch ct {
 		case "text/plain":
 			if plain == "" {
@@ -370,9 +380,9 @@ func parseBody(raw []byte) (text string, listUnsub bool) {
 	}
 	// The HTML part has the pictures and the links behind words.
 	if md := htmlMarkdown(markup); md != "" {
-		return md, listUnsub
+		return md, markup, listUnsub
 	}
-	return textMarkdown(plain), listUnsub
+	return textMarkdown(plain), "", listUnsub
 }
 
 var (

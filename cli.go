@@ -44,12 +44,14 @@ const cliUsage = `zmail — a local mail client for agents
                [--unread] [--since-days N] [--limit N] [--json]
                                          newest first, snippets only; 20 by default, 100 at most
   zmail read ID [--json]                 the whole conversation of a message, oldest first
-  zmail folders [--json]                 the folders of every account
+  zmail folders [--json]                 the folders of every account, with their roles
   zmail stats [--days N] [--json]        mail received and sent, and who handled it; 7 days by default
   zmail mark-read [--unread] ID... [--json]
                                          mark messages read, or unread with --unread
   zmail archive ID [--json]              archive the conversation of a message
-  zmail move --folder F ID... [--json]   file messages in a folder; trash, junk and drafts are refused
+  zmail move --folder F [--create] ID... [--json]
+                                         file messages in a folder the account has (junk: its junk folder);
+                                         --create makes a missing one; trash and drafts are refused
 
 Put flags before the IDs. Message IDs come from search. Mail is never sent,
 replied to or deleted. The password is never taken from the command line,
@@ -117,7 +119,7 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 	case "sync":
 		return svc.SyncAll()
 	case "search", "read", "folders", "stats", "mark-read", "archive", "move":
-		return cliMail(svc, args, out)
+		return cliMail(svc, loadPrivacy(dir), dir, args, out)
 	case "account":
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], cliUsage)

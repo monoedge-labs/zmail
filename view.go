@@ -155,6 +155,7 @@ func (a *app) sidebar(c *ui.Context, p pal) {
 					a.navItem(c, p, "mail:inbox", icoInbox, ui.Color{}, "收件箱", a.total, true)
 					a.navItem(c, p, "mail:sent", icoSent, ui.Color{}, "已发送", 0, false)
 					a.navItem(c, p, "mail:archive", icoArchive, ui.Color{}, "归档", 0, false)
+					a.navItem(c, p, "mail:junk", icoJunk, ui.Color{}, "垃圾邮件", 0, false)
 				})
 				if len(a.folders) > 0 {
 					ui.Column(c).Gap(2).Children(func() {
@@ -254,6 +255,8 @@ func (a *app) title() string {
 		return "已发送"
 	case a.nav == "mail:archive":
 		return "归档"
+	case a.nav == "mail:junk":
+		return "垃圾邮件"
 	case strings.HasPrefix(a.nav, "folder:"):
 		return strings.TrimPrefix(a.nav, "folder:")
 	case strings.HasPrefix(a.nav, "acct:"):
@@ -284,13 +287,17 @@ func (a *app) listPane(c *ui.Context, p pal) {
 	_, _, _, unread := a.groups()
 	ui.Column(c).Basis(340).Grow(1).MinWidth(0).Gap(16).Padding(16, 12).Radius(16).
 		Background(p.listBg).Border(1, p.listEdge).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Padding(0, 8).DragWindow().Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(8).Padding(0, 8).DragWindow().Children(func() {
 			ui.Text(c, a.title()).FontSize(20).FontWeight(600).TextColor(p.ink).Grow(1).SingleLine()
-			status := fmt.Sprintf("%d 封未读", unread)
 			if a.syncing {
-				status = "同步中…"
+				ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+					orbSpinner(c, p, syncOrb)
+					muted(c, p, "同步中…")
+				})
+			} else {
+				muted(c, p, fmt.Sprintf("%d 封未读", unread))
 			}
-			muted(c, p, status)
+			a.shield(c, p, true)
 		})
 		before := a.query
 		field.SearchBar(c, &a.query, field.SearchBarProps{Placeholder: "搜索邮件", ShortKey: "mod+f", Size: theme.Large, Variant: field.InputFilled})
@@ -357,8 +364,8 @@ func (a *app) personRow(c *ui.Context, p pal, i int) {
 				ui.Text(c, who(m)).SingleLine().Grow(1).FontWeight(weight(!m.Seen, 600, 500)).TextColor(p.ink)
 				muted(c, p, when(m.Date)).FontSize(12)
 			})
-			ui.Text(c, m.Subject).SingleLine().FontWeight(weight(!m.Seen, 500, 400)).TextColor(p.ink)
-			muted(c, p, m.Snippet).SingleLine()
+			maskedText(c, p, m.Subject, 0, weight(!m.Seen, 500, 400), p.ink).SingleLine()
+			maskedText(c, p, m.Snippet, 13, 400, p.muted).SingleLine()
 		})
 	})
 	switch {
@@ -384,7 +391,7 @@ func (a *app) compactRow(c *ui.Context, p pal, i int) {
 	sel := a.hasCur && a.cur.ID == m.ID
 	b := ui.ButtonBase(c).FillWidth().MinHeight(44).Gap(12).Padding(0, 12).Radius(12).Justify(ui.Start).Label(m.Subject).Key(m.ID)
 	b.Children(func() {
-		ui.Text(c, m.Subject).SingleLine().Grow(1).MinWidth(0).FontWeight(weight(!m.Seen, 500, 400)).TextColor(p.ink)
+		maskedText(c, p, m.Subject, 0, weight(!m.Seen, 500, 400), p.ink).SingleLine().Grow(1).MinWidth(0)
 		muted(c, p, when(m.Date)).FontSize(12)
 	})
 	switch {
@@ -439,14 +446,102 @@ func (a *app) readerPane(c *ui.Context, p pal) {
 			return
 		}
 		a.toolbar(c, p)
-		ui.Text(c, a.cur.Subject).FontSize(24).FontWeight(600).LineHeight(1.35).TextColor(p.ink)
+		if a.priv.View {
+			a.maskBanner(c, p)
+		}
+		maskedText(c, p, a.cur.Subject, 24, 600, p.ink).LineHeight(1.35)
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Gap(24).Children(func() {
-				for _, m := range a.thread {
+			ui.Column(c).Children(func() {
+				for i, m := range a.thread {
+					if i > 0 { // a line between mails, plain enough to find the next one
+						ui.Box(c).Height(1).Background(p.rule).Margin(28, 0)
+					}
 					a.message(c, p, m)
 				}
 			})
 		})
+	})
+}
+
+// shield is the switch of hiding private values in the mail shown: a pill
+// that is blue and says 已打码 while it is on, and plain, saying 打码, when it
+// is off, so that its state is seen at a glance.
+func (a *app) shield(c *ui.Context, p pal, compact bool) {
+	on := a.priv.View
+	label, tip, ink, icon := "打码", "隐藏邮件里的邮箱、手机号、证件号、薪资、金额、密钥和验证码；本地模型还会隐藏姓名和地址", p.muted, icoShieldOff
+	state := "打码：已关闭"
+	if on {
+		label, tip, ink, icon = "已打码", "点击显示原文", p.blue, icoShield
+		state = "打码：已开启"
+	}
+	b := ui.ButtonBase(c).Height(30).Padding(0, 10).Gap(6).Radius(15).Label(state).Tooltip(tip)
+	if compact {
+		b.Padding(0, 7)
+	}
+	b.Children(func() {
+		ui.Icon(c, icon).Size(16, 16).TextColor(ink)
+		if !compact {
+			ui.Text(c, label).FontSize(13).FontWeight(600).TextColor(ink)
+		}
+	})
+	switch {
+	case on:
+		b.Background(p.blue.Alpha(.14))
+	case b.Hovered():
+		b.Background(p.hover)
+	}
+	if b.Clicked() {
+		next := a.priv
+		next.View = !next.View
+		a.setPrivacy(next)
+	}
+}
+
+// maskBanner tells, over the mail, that its values are hidden and how many,
+// what falls short of that while the model is not there, and shows the values
+// again on a click.
+func (a *app) maskBanner(c *ui.Context, p pal) {
+	text := fmt.Sprintf("已隐藏 %d 项敏感信息", a.hidden)
+	switch {
+	case a.hiding:
+		text = "正在识别敏感信息…"
+	case a.hidden == 0:
+		text = "已打码，这封邮件里没有发现敏感信息"
+	}
+	note, act := a.maskNote()
+	tint, ink := p.blue.Alpha(.1), p.blue
+	if note != "" {
+		text, tint, ink = text+" · "+note, p.orange.Alpha(.12), p.orange
+	}
+	button := func(label string, strong bool) bool {
+		b := ui.ButtonBase(c).Height(26).Padding(0, 10).Radius(13).Label(label)
+		b.Children(func() { ui.Text(c, label).FontSize(13).FontWeight(600).TextColor(ink) })
+		if b.Hovered() {
+			b.Background(ink.Alpha(.14))
+		}
+		return b.Clicked()
+	}
+	ui.Row(c).AlignItems(ui.Center).Gap(8).Padding(8, 8, 8, 14).Radius(12).Background(tint).Children(func() {
+		ui.Icon(c, icoShield).Size(16, 16).TextColor(ink)
+		ui.Text(c, text).FontSize(13).TextColor(ink).Grow(1)
+		if act != "" && button(act, false) {
+			next := a.priv
+			switch act {
+			case "开启":
+				next.ModelOff = false
+			default: // 下载, 重试
+				a.dl.err = ""
+				a.vm.reset()
+				a.downloadModel()
+			}
+			a.setPrivacy(next)
+			a.reload()
+		}
+		if button("显示原文", true) {
+			next := a.priv
+			next.View = false
+			a.setPrivacy(next)
+		}
 	})
 }
 
@@ -471,6 +566,14 @@ func (a *app) toolbar(c *ui.Context, p pal) {
 				a.moveThread(key)
 			}
 		}
+		if a.cur.Role == store.RoleJunk {
+			jp := big
+			jp.Title = "不是垃圾邮件，移回收件箱"
+			if action.ActionIcon(c, icoInbox, jp).Clicked() {
+				a.moveThread("INBOX")
+			}
+		}
+		a.shield(c, p, false)
 		rp, ic := big, icoMailOpen
 		rp.Title = "标为未读（⌘U）"
 		if !a.cur.Seen {
@@ -512,9 +615,17 @@ func (a *app) message(c *ui.Context, p pal, m store.Message) {
 				muted(c, p, fmt.Sprintf("%s · %s · %s", m.FromAddr, a.acctByID(m.AccountID), whenLong(m.Date)))
 			})
 		})
-		ui.Column(c).MaxWidth(680).Children(func() {
-			markdown.Markdown(c, m.Body, markdown.MarkdownProps{FontSize: 15, LineHeight: 1.7, HeaderMultiple: 0.4, MarginMultiple: 1.2, LoadImage: loadImage})
-		})
+		if pg := a.pages[m.ID]; pg != nil {
+			ui.WebView(c, pg.view).Height(float32(pg.h.Load())).Radius(8)
+		} else {
+			if a.priv.View && m.HTML == "" {
+				plainBody(c, p, m.Body)
+			} else {
+				ui.Column(c).MaxWidth(680).Children(func() {
+					markdown.Markdown(c, m.Body, markdown.MarkdownProps{FontSize: 15, LineHeight: 1.7, HeaderMultiple: 0.4, MarginMultiple: 1.2, LoadImage: loadImage})
+				})
+			}
+		}
 		if m.HandledBy == store.ActorAgent && m.Seen {
 			ui.Row(c).AlignItems(ui.Center).Gap(8).MaxWidth(640).Padding(16, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(p.hair).Children(func() {
 				ui.Icon(c, icoEye).Size(16, 16).TextColor(p.muted)

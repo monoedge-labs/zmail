@@ -178,7 +178,7 @@ func (s *Service) syncFolder(a store.Account, r Remote, f Folder) error {
 		if err := s.Store.UpsertMessage(store.Message{
 			AccountID: a.ID, Folder: f.Name, Role: f.Role, UID: h.UID,
 			ThreadKey: ThreadKey(h.Subject), FromName: h.FromName, FromAddr: h.FromAddr,
-			Subject: h.Subject, Snippet: Snippet(PlainText(h.Body), 140), Body: h.Body, Date: h.Date, Seen: h.Seen,
+			Subject: h.Subject, Snippet: Snippet(PlainText(h.Body), 140), Body: h.Body, HTML: h.HTML, Date: h.Date, Seen: h.Seen,
 			Category: Categorize(h.FromAddr, h.ListUnsub),
 		}); err != nil {
 			return err
@@ -300,8 +300,8 @@ func (s *Service) Archive(who Who, ids []int64) (err error) {
 	return nil
 }
 
-// MoveToFolder files messages in a folder. Trash, junk and drafts are
-// refused: nothing here deletes mail.
+// MoveToFolder files messages in a folder, the junk folder too. Trash and
+// drafts are refused: nothing here deletes mail.
 func (s *Service) MoveToFolder(who Who, ids []int64, folder string) (err error) {
 	defer func() { s.log(who, "move_to_folder", fmt.Sprintf("%d messages to %q", len(ids), folder), err) }()
 	bs, err := s.batches(ids)

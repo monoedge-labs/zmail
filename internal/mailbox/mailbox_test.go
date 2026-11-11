@@ -59,18 +59,25 @@ func TestParseBodyGBKAndHTML(t *testing.T) {
 	// "你好，世界" in GBK
 	gbk := "From: a@b.c\r\nSubject: x\r\nContent-Type: text/plain; charset=gbk\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" +
 		"\xc4\xe3\xba\xc3\xa3\xac\xca\xc0\xbd\xe7"
-	if got, _ := parseBody([]byte(gbk)); got != "你好，世界" {
+	if got, _, _ := parseBody([]byte(gbk)); got != "你好，世界" {
 		t.Errorf("gbk body = %q", got)
 	}
 	multi := "From: a@b.c\r\nList-Unsubscribe: <mailto:u@b.c>\r\nContent-Type: multipart/alternative; boundary=XX\r\n\r\n" +
 		"--XX\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<style>p{}</style><p>Hello&nbsp;<b>there</b></p><p>Bye</p>\r\n--XX--\r\n"
-	got, unsub := parseBody([]byte(multi))
+	got, _, unsub := parseBody([]byte(multi))
 	if !unsub || !strings.Contains(got, "Hello") || !strings.Contains(got, "Bye") || strings.Contains(got, "<") || strings.Contains(got, "p{}") {
 		t.Errorf("html body = %q, unsub=%v", got, unsub)
 	}
+	// The HTML part comes as it is, for the window to draw.
+	if _, markup, _ := parseBody([]byte(multi)); !strings.Contains(markup, "<style>p{}</style>") {
+		t.Errorf("html = %q", markup)
+	}
+	if _, markup, _ := parseBody([]byte(gbk)); markup != "" {
+		t.Errorf("a plain message has no html, got %q", markup)
+	}
 	// A cut message still yields what came before the cut.
 	cut := multi[:strings.Index(multi, "Bye")+1]
-	if got, _ := parseBody([]byte(cut)); !strings.Contains(got, "Hello") {
+	if got, _, _ := parseBody([]byte(cut)); !strings.Contains(got, "Hello") {
 		t.Errorf("cut body = %q", got)
 	}
 }
@@ -331,7 +338,7 @@ func TestAddAccountFailureKeepsNothing(t *testing.T) {
 func TestICloudFolders(t *testing.T) {
 	for name, want := range map[string]string{
 		"INBOX": "inbox", "Sent Messages": "sent", "Archive": "archive",
-		"Deleted Messages": RoleSkip, "Junk": RoleSkip, "Drafts": RoleSkip, "Notes": "other",
+		"Deleted Messages": RoleSkip, "Junk": "junk", "Drafts": RoleSkip, "Notes": "other",
 	} {
 		if got := folderRole(name, nil); got != want {
 			t.Errorf("folderRole(%q) = %q, want %q", name, got, want)
@@ -370,5 +377,34 @@ func TestBodyMarkdown(t *testing.T) {
 	if !strings.Contains(text, `Hello\_world  `) || !strings.Contains(text, `\- not a list`) ||
 		!strings.Contains(text, "<https://x.com/a_b?c=1>") || !strings.Contains(text, "\n\nBye") {
 		t.Errorf("text markdown = %q", text)
+	}
+}
+
+func TestInlineImages(t *testing.T) {
+	png := &imap.BodyStructureSinglePart{Type: "image", Subtype: "png", ID: "<ii_abc@x>", Encoding: "base64", Size: 400}
+	big := &imap.BodyStructureSinglePart{Type: "image", Subtype: "png", ID: "<big>", Encoding: "base64", Size: 20 << 20}
+	svg := &imap.BodyStructureSinglePart{Type: "image", Subtype: "svg+xml", ID: "<vec>", Encoding: "base64", Size: 400}
+	file := &imap.BodyStructureSinglePart{Type: "image", Subtype: "png", Encoding: "base64", Size: 400} // an attachment: no Content-ID
+	html := &imap.BodyStructureSinglePart{Type: "text", Subtype: "html", Encoding: "7bit", Size: 100}
+	bs := &imap.BodyStructureMultiPart{Subtype: "mixed", Children: []imap.BodyStructure{
+		&imap.BodyStructureMultiPart{Subtype: "related", Children: []imap.BodyStructure{html, png, big, svg}}, file}}
+
+	parts := inlineParts(bs)
+	if len(parts) != 1 || parts[0].cid != "ii_abc@x" || len(parts[0].path) != 2 || parts[0].path[0] != 1 || parts[0].path[1] != 2 {
+		t.Fatalf("inlineParts = %+v, want the one small picture at 1.2", parts)
+	}
+
+	uri, ok := dataURI("image/png", "base64", []byte("iVBORw0K\r\nGgo=\r\n"))
+	if !ok || uri != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Errorf("dataURI = %q, %v", uri, ok)
+	}
+	if _, ok := dataURI("image/png", "quoted-printable", []byte("x")); ok {
+		t.Error("an unknown encoding must give nothing")
+	}
+
+	markup := `<img src="cid:II_ABC%40x" alt=a><img src='cid:missing'>`
+	got := replaceCID(markup, map[string]string{"ii_abc@x": "data:image/png;base64,AA=="})
+	if got != `<img src="data:image/png;base64,AA==" alt=a><img src='cid:missing'>` {
+		t.Errorf("replaceCID = %s", got)
 	}
 }
