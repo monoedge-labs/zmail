@@ -39,6 +39,14 @@ const cliUsage = `zmail — a local mail client for agents
                                          or is asked for without echo
   zmail account remove --email ADDR      forget an account and its password here
   zmail sync                             fetch new mail now
+  zmail llm show [--json]                the model service behind the window's AI polish
+  zmail llm set [--base-url URL] [--model M] [--key-stdin]
+                                         use your own OpenAI-compatible service; the key comes from stdin;
+                                         changing the URL forgets the stored key unless a new one is given
+  zmail llm reset                        back to the built-in free service
+  zmail issue [--title T] [--body TEXT] [--print] [--json]
+                                         report a problem or an idea: opens a prefilled GitHub issue
+                                         in the browser, for the user to edit and submit
 
   zmail search [--query Q] [--account ADDR] [--folder F] [--category person|notification|newsletter]
                [--unread] [--since-days N] [--limit N] [--json]
@@ -72,7 +80,7 @@ func runCLI(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "account", "sync", "providers", "skill", "search", "read", "folders", "stats", "mark-read", "archive", "move", "help", "-h", "--help":
+	case "account", "sync", "providers", "skill", "issue", "llm", "search", "read", "folders", "stats", "mark-read", "archive", "move", "help", "-h", "--help":
 	default:
 		return false
 	}
@@ -101,6 +109,10 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 	case "skill":
 		_, err := io.WriteString(out, skillText())
 		return err
+	case "issue":
+		return cliIssue(args[1:], out)
+	case "llm":
+		return cliLLM(dir, sec, args[1:], in, out)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

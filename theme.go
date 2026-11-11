@@ -15,7 +15,7 @@ type pal struct {
 	shadow, shadowSoft, sheetShadow                                                              ui.Color
 
 	base       ui.Color // the window's ground where the system draws no material
-	scrim, pop ui.Color // behind a dialog, and the dialog's tint over its blur
+	scrim, pop ui.Color // behind a dialog, and the dialog's own ground, which is opaque
 }
 
 func palFor(dark bool) pal {
@@ -30,7 +30,7 @@ func palFor(dark bool) pal {
 			rule:   ui.RGBA(20, 30, 60, .22),
 			shadow: ui.RGBA(46, 58, 110, .12), shadowSoft: ui.RGBA(46, 58, 110, .08), sheetShadow: ui.RGBA(46, 58, 110, .28),
 			base:  ui.Hex("#E8ECF4"),
-			scrim: ui.RGBA(20, 30, 60, .16), pop: w(.55),
+			scrim: ui.RGBA(20, 30, 60, .16), pop: ui.Hex("#F7F8FC"),
 		}
 	}
 	return pal{
@@ -43,7 +43,7 @@ func palFor(dark bool) pal {
 		rule:   w(.26),
 		shadow: ui.RGBA(0, 0, 0, .3), shadowSoft: ui.RGBA(0, 0, 0, .22), sheetShadow: ui.RGBA(0, 0, 0, .5),
 		base:  ui.Hex("#1A1D29"),
-		scrim: ui.RGBA(0, 0, 0, .35), pop: ui.RGBA(36, 40, 56, .62),
+		scrim: ui.RGBA(0, 0, 0, .35), pop: ui.Hex("#262A3B"),
 	}
 }
 

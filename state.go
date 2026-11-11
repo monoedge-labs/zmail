@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/lobehub/lobe-mygo/pkg/form"
 
 	"github.com/monoedge-labs/zmail/internal/guard"
 	"github.com/monoedge-labs/zmail/internal/mailbox"
@@ -60,7 +62,41 @@ type app struct {
 	range_ int // index of ranges
 	stats  store.Stats
 
-	add addState
+	add  addState
+	link linkAsk
+	fb   feedbackState
+
+	sec   mailbox.Secrets // the keychain; nil keeps no secret
+	llm   llmSettings     // the model service in use, read once: the keychain is slow
+	llmOK bool
+}
+
+// feedbackState is the sheet that collects an issue: what the user wrote and,
+// once they asked for it, the model's polish of it, which they may edit.
+type feedbackState struct {
+	open     bool
+	text     string
+	draft    issueDraft
+	polished bool
+	busy     bool
+	err      string
+	set      llmForm
+}
+
+// llmForm is the model settings the user is editing in the sheet.
+type llmForm struct {
+	open bool
+	f    *form.Form[llmValues]
+	err  string
+}
+
+// llmValues are the fields of that form; empty ones are the built-in.
+type llmValues struct{ Base, Model, Key string }
+
+// linkAsk is a link the user clicked in mail, waiting for a yes.
+type linkAsk struct {
+	open bool
+	url  string
 }
 
 type addState struct {
@@ -277,6 +313,25 @@ func (a *app) setPrivacy(p privacy) {
 	}
 }
 
+// openLink follows a link the user clicked in mail. Mail is read-only
+// unless the user turned the guard off: the link is held and the window asks
+// first. Any goroutine may call it.
+func (a *app) openLink(u string) {
+	if !external(u) {
+		return
+	}
+	if a.priv.NoLinkGuard {
+		openURL(u)
+		return
+	}
+	ask := func() { a.link = linkAsk{open: true, url: u} }
+	if a.win == nil { // under test: no window, no other thread
+		ask()
+		return
+	}
+	a.win.Update(ask)
+}
+
 // navigate follows the sidebar's choice.
 func (a *app) navigate(id string) {
 	a.nav = id
@@ -391,4 +446,86 @@ func (a *app) addAccount() {
 			a.reload()
 		})
 	}()
+}
+
+// polishFeedback sends the user's text to the model, and shows the fields
+// it makes. Only the user's click gets here.
+func (a *app) polishFeedback() {
+	f := &a.fb
+	if f.busy {
+		return
+	}
+	if strings.TrimSpace(f.text) == "" {
+		f.err = "先写几句描述"
+		return
+	}
+	f.busy, f.err = true, ""
+	text, cfg := f.text, a.llmNow()
+	done := func(d issueDraft, err error) {
+		f.busy = false
+		if err != nil {
+			f.err = err.Error()
+			return
+		}
+		f.draft, f.polished = d, true
+	}
+	if a.win == nil { // under test: no window, no other thread
+		d, err := polish(context.Background(), cfg, text)
+		done(d, err)
+		return
+	}
+	go func() {
+		d, err := polish(context.Background(), cfg, text)
+		a.win.Update(func() { done(d, err) })
+	}()
+}
+
+// sendFeedback opens the issue page with the polished fields, or with the
+// text as it was typed, and closes the sheet.
+func (a *app) sendFeedback() {
+	f := &a.fb
+	d := f.draft
+	if !f.polished {
+		d = issueDraft{What: strings.TrimSpace(f.text)}
+	}
+	openIssue(d)
+	*f = feedbackState{}
+}
+
+// llmNow is the model service in use.
+func (a *app) llmNow() llmSettings {
+	if !a.llmOK {
+		a.llm, a.llmOK = resolveLLM(a.dir, a.sec), true
+	}
+	return a.llm
+}
+
+// toggleLLMForm opens the model settings with what is kept, or closes them.
+func (a *app) toggleLLMForm() {
+	s := &a.fb.set
+	if s.open {
+		s.open = false
+		return
+	}
+	c := loadLLMConfig(a.dir)
+	*s = llmForm{open: true, f: form.New(llmValues{Base: c.BaseURL, Model: c.Model})}
+}
+
+// saveLLM keeps the settings of the form.
+func (a *app) saveLLM() {
+	s := &a.fb.set
+	if err := setLLM(a.dir, a.sec, llmConfig{BaseURL: s.f.Values.Base, Model: s.f.Values.Model}, strings.TrimSpace(s.f.Values.Key)); err != nil {
+		s.err = err.Error()
+		return
+	}
+	*s, a.llmOK, a.fb.err = llmForm{}, false, ""
+}
+
+// resetLLMForm goes back to the built-in service.
+func (a *app) resetLLMForm() {
+	if err := resetLLM(a.dir, a.sec); err != nil {
+		a.fb.set.err = err.Error()
+		return
+	}
+	a.fb.set, a.llmOK, a.fb.err = llmForm{}, false, ""
 }

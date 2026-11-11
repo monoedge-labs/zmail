@@ -19,6 +19,10 @@ type privacy struct {
 	// ModelOff turns the local model off. It is on by default: names and
 	// addresses are most of what patterns cannot find.
 	ModelOff bool `json:"model_off"`
+	// NoLinkGuard lets a click on a link in mail open the browser at once. By
+	// default mail is read-only: a click asks first, as a link in mail is a
+	// common way to lure someone to a fake page.
+	NoLinkGuard bool `json:"no_link_guard"`
 }
 
 func (p privacy) model() bool { return !p.ModelOff }

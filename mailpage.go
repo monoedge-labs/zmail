@@ -93,19 +93,20 @@ func (a *app) newPage(m store.Message) *mailPage {
 			}
 		}
 	})
-	// The page stays where it is; a link the user follows opens outside.
+	// The page stays where it is; a link the user follows opens outside, once
+	// the user has confirmed it (see openLink).
 	pg.OnWillNavigate(func(e *mygo.NavigateEvent) {
 		if e.URL == "about:blank" {
 			return
 		}
 		e.PreventDefault()
-		if e.UserInitiated && external(e.URL) {
-			openURL(e.URL)
+		if e.UserInitiated {
+			a.openLink(e.URL)
 		}
 	})
 	pg.SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
-		if req.UserInitiated && external(req.URL) {
-			openURL(req.URL)
+		if req.UserInitiated {
+			a.openLink(req.URL)
 		}
 		return nil
 	})
