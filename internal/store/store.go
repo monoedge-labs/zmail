@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS ops (
 	ts INTEGER NOT NULL, actor TEXT NOT NULL, client TEXT NOT NULL,
 	tool TEXT NOT NULL, detail TEXT NOT NULL, ok INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS findings (key BLOB PRIMARY KEY, spans BLOB NOT NULL);
 `
 
 // Open opens (and creates) the database at path; ":memory:" keeps it in memory.
@@ -166,10 +167,31 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	// The findings are a cache the model can recompute, so only the newest are
+	// kept: a row replaced takes the next rowid, so the newest 50000 rowids
+	// hold them, and with nothing to drop this reads one index entry.
+	// ponytail: ceiling of 50000 findings, trimmed here at open; trim by use instead of by age if it drops what is read often.
+	if _, err := db.Exec(`DELETE FROM findings WHERE rowid <= (SELECT MAX(rowid) FROM findings) - 50000`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// Findings is what SetFindings kept under key. The store holds the bytes as
+// they are: what they mean is for the caller to say.
+func (s *Store) Findings(key []byte) (spans []byte, ok bool) {
+	err := s.db.QueryRow(`SELECT spans FROM findings WHERE key = ?`, key).Scan(&spans)
+	return spans, err == nil
+}
+
+// SetFindings keeps spans under key, in place of what was there.
+func (s *Store) SetFindings(key, spans []byte) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO findings (key, spans) VALUES (?,?)`, key, spans)
+	return err
+}
 
 func (s *Store) UpsertAccount(a Account) error {
 	_, err := s.db.Exec(`INSERT INTO accounts (id, provider, email, host) VALUES (?,?,?,?)

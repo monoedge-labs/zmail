@@ -269,12 +269,14 @@ func TestHidePrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Advance(300e6)
-	if strings.Contains(a.cur.Body+a.cur.HTML+a.cur.Snippet, "481516") || strings.Contains(a.cur.Body+a.cur.HTML, "lin@acme.com") ||
-		!strings.Contains(a.cur.HTML, "mailto:‹EMAIL_1›") {
+	// the message chosen keeps its hidden subject and snippet, and none of its text
+	if strings.Contains(a.cur.Subject+a.cur.Snippet+a.cur.Body+a.cur.HTML, "481516") || strings.Contains(a.cur.Body+a.cur.HTML, "lin@acme.com") ||
+		a.cur.Subject != "验证码 ‹CODE_1›" {
 		t.Errorf("message not hidden: %+v", a.cur)
 	}
 	// the page's own markup, which the web view loads, is what is hidden
-	if h := a.thread[len(a.thread)-1].HTML; strings.Contains(h, "481516") || strings.Contains(h, "lin@acme.com") || !strings.Contains(h, `data-k="CODE"`) {
+	if h := a.thread[len(a.thread)-1].HTML; strings.Contains(h, "481516") || strings.Contains(h, "lin@acme.com") ||
+		!strings.Contains(h, `data-k="CODE"`) || !strings.Contains(h, "mailto:‹EMAIL_1›") {
 		t.Errorf("thread html not hidden: %s", h)
 	}
 	// the store keeps the real text
@@ -350,7 +352,7 @@ func TestHideWithModel(t *testing.T) {
 			t.Errorf("html keeps %q: %s", leak, h)
 		}
 	}
-	if !strings.Contains(h, `<b><mark class="zm" data-k="PERSON" title="姓名">姓名 1</mark></b>`) || !strings.Contains(h, `href="tel:‹PHONE_1›"`) {
+	if !strings.Contains(h, `<b><mark class="zm" data-k="PERSON" title="姓名">`+redact.Fake(redact.Person, 1)+`</mark></b>`) || !strings.Contains(h, `href="tel:‹PHONE_1›"`) {
 		t.Errorf("html: %s", h)
 	}
 	for _, m := range a.rows { // the list too
@@ -364,4 +366,119 @@ func TestHideWithModel(t *testing.T) {
 	}
 	tt.Advance(300e6)
 	shot(t, tt, "13-hidden-model")
+}
+
+// With hiding on, a message is hidden when it comes into view: the rows and
+// the mails further down show as "…" and are not read, none shows its text,
+// and what was hidden once is kept, so that a reload hides nothing again.
+func TestHideInView(t *testing.T) {
+	a := testApp(t)
+	acc := a.accounts[0].ID
+	for i := range 80 {
+		key := fmt.Sprint("row", i)
+		if i < 8 {
+			key = "long" // a thread of eight mails
+		}
+		if err := a.st.UpsertMessage(store.Message{AccountID: acc, Folder: "INBOX", Role: store.RoleInbox, UID: uint32(2000 + i), ThreadKey: key,
+			FromName: "Bank", FromAddr: "bank@x.com", Subject: fmt.Sprintf("回电 1380013%04d", i), Snippet: "验证码 481516",
+			Body: fmt.Sprintf("第 %d 封，请回电 1380013%04d", i, i), Date: time.Now().Add(-time.Duration(i) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.priv = privacy{View: true, ModelOff: true}
+	a.reload()
+	for _, m := range a.rows {
+		if m.Subject != "…" {
+			t.Fatalf("a row is hidden before the window shows it: %q", m.Subject)
+		}
+	}
+	tt := ui.NewTester(a.view, 1360, 900)
+	tt.Advance(300e6)
+	shown := 0
+	for _, m := range a.rows {
+		if strings.Contains(m.Subject+m.Snippet, "1380013") || strings.Contains(m.Subject+m.Snippet, "481516") {
+			t.Fatalf("a row shows its text: %+v", m)
+		}
+		if m.Subject != "…" {
+			shown++
+		}
+	}
+	if shown == 0 || shown > 40 || a.rows[0].Subject != "回电 ‹PHONE_1›" || a.rows[len(a.rows)-1].Subject != "…" {
+		t.Fatalf("%d of %d rows hidden, first %q, last %q: want those in view", shown, len(a.rows), a.rows[0].Subject, a.rows[len(a.rows)-1].Subject)
+	}
+
+	// the thread: its first mail at once, the ones in view after a frame, the rest not
+	if err := tt.Click("Bank：回电 ‹PHONE_1›"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.thread) != 8 || !strings.Contains(a.thread[0].Body, "‹PHONE_1›") {
+		t.Fatalf("thread of %d, first %q", len(a.thread), a.thread[0].Body)
+	}
+	tt.Advance(300e6)
+	if a.rest == 0 || a.rest > 6 || a.hiding || a.thread[7].Body != "正在识别敏感信息…" {
+		t.Fatalf("%d mails of the thread left, last %q: want those out of view", a.rest, a.thread[7].Body)
+	}
+	for _, m := range a.thread {
+		if strings.Contains(m.Subject+m.Snippet+m.Body, "1380013") {
+			t.Fatalf("a mail shows its text: %+v", m)
+		}
+	}
+	if !tt.HasText(fmt.Sprintf("已隐藏 %d 项敏感信息，其余 %d 封滚动到时识别", a.hidden, a.rest)) {
+		t.Errorf("the banner does not tell what is left: %q", tt.Texts())
+	}
+
+	// kept: a reload makes no hidden copy again, and showing the text and
+	// hiding it again neither
+	n := len(a.veils)
+	a.reload()
+	tt.Advance(300e6)
+	a.setPrivacy(privacy{ModelOff: true})
+	if a.rows[0].Subject == "…" || !strings.Contains(a.rows[0].Subject, "1380013") {
+		t.Fatalf("text not shown again: %q", a.rows[0].Subject)
+	}
+	a.setPrivacy(privacy{View: true, ModelOff: true})
+	if a.rows[0].Subject != "回电 ‹PHONE_1›" || len(a.veils) != n {
+		t.Errorf("hidden copies not kept: %d, then %d; first row %q", n, len(a.veils), a.rows[0].Subject)
+	}
+}
+
+// A mail of the thread that was seen waiting for the model is crossed by the
+// wave once it is hidden; one hidden at once, as most are, is not.
+func TestWaveAfterWait(t *testing.T) {
+	a := testApp(t)
+	a.priv = privacy{View: true, ModelOff: true}
+	a.reload()
+	a.open(0)
+	id := a.thread[0].ID
+	k := veilKey{id, true, a.variant()}
+	if _, ok := a.veils[k]; !ok || len(a.waveAt) != 0 || len(a.pendAt) != 0 {
+		t.Fatalf("a mail hidden at once: wave %v, waiting %v", a.waveAt, a.pendAt)
+	}
+	a.pend(k)
+	a.keep(k, a.veils[k]) // read within beamDelay
+	if len(a.waveAt) != 0 || len(a.pendAt) != 0 {
+		t.Fatalf("a short wait: wave %v, waiting %v", a.waveAt, a.pendAt)
+	}
+	a.pend(k)
+	a.pendAt[id] = time.Now().Add(-time.Second)
+	a.keep(k, a.veils[k])
+	if at, ok := a.waveAt[id]; !ok || !at.IsZero() || len(a.pendAt) != 0 {
+		t.Fatalf("a wait that showed: wave %v, waiting %v", a.waveAt, a.pendAt)
+	}
+	// the wave begins with the frame that draws it, and is over after
+	// waveDuration (moved back here, not waited for: the headless Tester
+	// runs the wave's shader on the CPU, a second a frame)
+	tt := ui.NewTester(a.view, 1360, 900)
+	if a.waveAt[id].IsZero() {
+		t.Fatal("the wave did not begin with its first frame")
+	}
+	a.waveAt[id] = a.waveAt[id].Add(-waveDuration)
+	tt.Frame()
+	if len(a.waveAt) != 0 {
+		t.Errorf("the wave is not over: %v", a.waveAt)
+	}
+	a.open(1) // another thread starts clean
+	if len(a.waveAt) != 0 || len(a.pendAt) != 0 {
+		t.Errorf("left over: %v %v", a.waveAt, a.pendAt)
+	}
 }

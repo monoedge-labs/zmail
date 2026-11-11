@@ -166,3 +166,21 @@ func TestJunkApart(t *testing.T) {
 		t.Errorf("received = %d, junk must not count", st.Received)
 	}
 }
+
+func TestFindings(t *testing.T) {
+	s := seed(t)
+	k := []byte("key")
+	if _, ok := s.Findings(k); ok {
+		t.Fatal("a miss reads as a hit")
+	}
+	if err := s.SetFindings(k, []byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := s.Findings(k); !ok || string(b) != "a" {
+		t.Fatalf("hit = %q %v", b, ok)
+	}
+	s.SetFindings(k, []byte("b"))
+	if b, _ := s.Findings(k); string(b) != "b" {
+		t.Errorf("replaced = %q, want b", b)
+	}
+}

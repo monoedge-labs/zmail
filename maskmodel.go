@@ -3,13 +3,63 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/monoedge-labs/zmail/internal/guard"
 	"github.com/monoedge-labs/zmail/internal/redact"
+	"github.com/monoedge-labs/zmail/internal/store"
 )
+
+// findingsFormat versions how findings are kept on disk; a new one leaves the
+// old ones unread.
+const findingsFormat = "1"
+
+// storedFindings is what the model found in text on an earlier run, if it did.
+// rev names the model's files, so another model starts clean.
+func storedFindings(st *store.Store, rev, text string) ([]redact.Found, bool) {
+	if st == nil {
+		return nil, false
+	}
+	b, ok := st.Findings(findingsKey(rev, text))
+	if !ok {
+		return nil, false
+	}
+	var found []redact.Found
+	if json.Unmarshal(b, &found) != nil {
+		return nil, false
+	}
+	return found, true
+}
+
+func findingsKey(rev, text string) []byte {
+	k := sha256.Sum256([]byte(findingsFormat + "\x00" + rev + "\x00" + text))
+	return k[:]
+}
+
+// storedModel has inner read a text once: what it finds is kept in st, and
+// the next time, in this run or another, the model is not asked. A store that
+// fails costs the saving, never the masking.
+func storedModel(st *store.Store, rev string, inner redact.Model) redact.Model {
+	if st == nil {
+		return inner
+	}
+	return func(text string) ([]redact.Found, bool) {
+		if found, ok := storedFindings(st, rev, text); ok {
+			return found, true
+		}
+		found, ready := inner(text)
+		if ready {
+			if b, err := json.Marshal(found); err == nil {
+				st.SetFindings(findingsKey(rev, text), b)
+			}
+		}
+		return found, ready
+	}
+}
 
 // viewModel reads the messages the window shows with the local model, off
 // the main thread: the model takes a moment for a long message, and the
@@ -21,6 +71,7 @@ type viewModel struct {
 	dir      func() string // where the model's files are
 	done     func()        // called when texts were read, to show them
 	windowed func() bool   // false under test, where it is read at once
+	st       *store.Store  // keeps what was found, so a text is read once, not at every launch
 
 	mu      sync.Mutex
 	model   *guard.Model
@@ -30,6 +81,10 @@ type viewModel struct {
 	queue   []queued          // the last one is read first: the newest ask is what is on screen
 	running bool
 }
+
+// queueMax is how many texts wait for the model: about what a window shows,
+// a second or two of reading.
+const queueMax = 64
 
 type queued struct {
 	k    [32]byte
@@ -48,12 +103,26 @@ func (v *viewModel) find(text string) ([]redact.Found, bool) {
 		v.mu.Unlock()
 		return nil, false
 	}
+	// A point query, quick enough to hold the lock: a text read in an earlier
+	// run shows masked at once.
+	if f, ok := storedFindings(v.st, filepath.Base(v.dir()), text); ok {
+		v.remember(k, f)
+		v.mu.Unlock()
+		return f, true
+	}
 	if v.waiting == nil {
 		v.waiting = map[[32]byte]bool{}
 	}
 	if !v.waiting[k] {
 		v.waiting[k] = true
 		v.queue = append(v.queue, queued{k, text})
+		// What is asked for is what is in view. Asks left behind by a scroll
+		// past them are dropped, oldest first: they are asked again when
+		// they show.
+		if len(v.queue) > queueMax {
+			delete(v.waiting, v.queue[0].k)
+			v.queue = v.queue[1:]
+		}
 	}
 	start := !v.running
 	v.running = true
@@ -100,13 +169,10 @@ func (v *viewModel) work() {
 				continue
 			}
 		}
-		found, _ := redact.FromGuard(m)(q.text)
+		found, _ := storedModel(v.st, filepath.Base(v.dir()), redact.FromGuard(m))(q.text)
 		v.mu.Lock()
 		v.model = m
-		if v.cache == nil || len(v.cache) > 2000 {
-			v.cache = map[[32]byte][]redact.Found{}
-		}
-		v.cache[q.k] = found
+		v.remember(q.k, found)
 		delete(v.waiting, q.k)
 		v.mu.Unlock()
 		if v.done != nil && time.Since(shown) > 500*time.Millisecond {
@@ -114,6 +180,14 @@ func (v *viewModel) work() {
 			v.done()
 		}
 	}
+}
+
+// remember keeps what was found in memory, with v.mu held.
+func (v *viewModel) remember(k [32]byte, found []redact.Found) {
+	if v.cache == nil || len(v.cache) > 2000 {
+		v.cache = map[[32]byte][]redact.Found{}
+	}
+	v.cache[k] = found
 }
 
 // failure is why the model could not be read, or "".
