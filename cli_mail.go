@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -182,7 +183,7 @@ func cliMail(svc *mailbox.Service, priv privacy, dir string, args []string, out 
 		if err != nil {
 			return err
 		}
-		hide, err := hider(priv, dir)
+		hide, err := hider(priv, dir, st)
 		if err != nil {
 			return err
 		}
@@ -199,7 +200,7 @@ func cliMail(svc *mailbox.Service, priv privacy, dir string, args []string, out 
 		if err != nil {
 			return fmt.Errorf("message %d: %w", ids[0], err)
 		}
-		hide, err := hider(priv, dir)
+		hide, err := hider(priv, dir, st)
 		if err != nil {
 			return err
 		}
@@ -367,8 +368,9 @@ func resolveFolder(st *store.Store, acc, name string, create bool) (string, erro
 // hider is the masker for what the agent reads, nil when the user hides
 // nothing. With the local model turned on it reads with the model too, and a
 // model that is missing or fails to load is an error: the user asked for
-// more than the patterns, and gets none of it silently.
-func hider(p privacy, dir string) (*redact.Masker, error) {
+// more than the patterns, and gets none of it silently. What the model finds
+// is kept in st, so a text it read before is not read again.
+func hider(p privacy, dir string, st *store.Store) (*redact.Masker, error) {
 	if !p.Agent {
 		return nil, nil
 	}
@@ -382,7 +384,7 @@ func hider(p privacy, dir string) (*redact.Masker, error) {
 		if err != nil {
 			return nil, fmt.Errorf("the masking model did not load: %w", err)
 		}
-		m.Model = redact.FromGuard(g)
+		m.Model = storedModel(st, filepath.Base(d), redact.FromGuard(g))
 	}
 	return m, nil
 }

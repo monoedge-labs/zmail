@@ -25,6 +25,30 @@ import (
 // appearance.
 
 func (a *app) view(c *ui.Context) {
+	// What the last frame found in view is hidden first, and shows in this one.
+	a.v = a.variant()
+	a.unveil()
+	// A message still to be hidden tells whether it shows a frame late (see
+	// near): a frame that held one out of view is followed by another, a
+	// moment later and one for all the frames until then, which asks for none.
+	now := c.Now()
+	settled := !a.settleAt.IsZero() && !now.Before(a.settleAt)
+	if settled {
+		a.settleAt = time.Time{}
+	}
+	a.late = false
+	defer func() {
+		if !a.late {
+			return
+		}
+		if a.settleAt.IsZero() && !settled {
+			a.settleAt = now.Add(settleDelay)
+		}
+		if !a.settleAt.IsZero() {
+			c.After(a.settleAt.Sub(now))
+		}
+	}()
+
 	theme.Apply(c)
 	p := palFor(theme.TokensOf(c).Dark)
 
@@ -360,6 +384,9 @@ func (a *app) personRow(c *ui.Context, p pal, i int) {
 	sel := a.hasCur && a.cur.ID == m.ID
 	b := ui.ButtonBase(c).FillWidth().Gap(12).Padding(12).Radius(14).Justify(ui.Start).AlignItems(ui.Start).
 		Label(who(m) + "：" + m.Subject).Key(m.ID)
+	if a.veiled(m.ID, false) {
+		a.near(c, b, m.ID, false, rowMargin)
+	}
 	b.Children(func() {
 		avatar(c, p, who(m), 36, sel)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
@@ -367,6 +394,12 @@ func (a *app) personRow(c *ui.Context, p pal, i int) {
 				ui.Text(c, who(m)).SingleLine().Grow(1).FontWeight(weight(!m.Seen, 600, 500)).TextColor(p.ink)
 				muted(c, p, when(m.Date)).FontSize(12)
 			})
+			if a.veiled(m.ID, false) {
+				live := a.asked[veilKey{m.ID, false, a.v}]
+				bone(c, 14, 62, live)
+				bone(c, 13, 88, live)
+				return
+			}
 			maskedText(c, p, m.Subject, 0, weight(!m.Seen, 500, 400), p.ink).SingleLine()
 			maskedText(c, p, m.Snippet, 13, 400, p.muted).SingleLine()
 		})
@@ -382,6 +415,48 @@ func (a *app) personRow(c *ui.Context, p pal, i int) {
 	}
 }
 
+// A row is hidden once it is within rowMargin of showing, so that it is by
+// the time it is scrolled to; a mail of the thread within mailMargin. A mail
+// still to be hidden holds mailHold of height, so that a long thread does not
+// bring all of its mails into view at once.
+const (
+	rowMargin  = 400
+	mailMargin = 300
+	mailHold   = 360
+)
+
+// settleDelay is how long after a frame the one that finds what it showed
+// comes: short enough to pass unseen, long enough that moving the pointer
+// does not draw every frame twice.
+const settleDelay = 50 * time.Millisecond
+
+// A mail hidden sooner than beamDelay shows neither the beam nor the wave:
+// most are, and light that comes and goes within a moment is noise. The beam
+// then comes up over beamFade.
+const (
+	beamDelay = 150 * time.Millisecond
+	beamFade  = 250 * time.Millisecond
+)
+
+// bone holds the place of a line of text still to be hidden, of that size: a
+// bar across share percent of the row, in a row as tall as the line, so that
+// nothing moves when the text comes. It pulses while live, as the model
+// reads the text, and is still otherwise: a row out of view waits unseen.
+func bone(c *ui.Context, size, share float32, live bool) ui.Element {
+	anim := display.SkeletonStatic
+	if live {
+		anim = display.SkeletonFade
+	}
+	row := ui.Row(c).FillWidth().AlignItems(ui.Center)
+	row.Children(func() {
+		ui.Text(c, " ").FontSize(size)
+		ui.Box(c).WidthPercent(share).Children(func() {
+			display.Skeleton(c, display.SkeletonProps{Height: size - 3, Animation: anim})
+		})
+	})
+	return row
+}
+
 func weight(strong bool, hi, lo int) int {
 	if strong {
 		return hi
@@ -393,8 +468,15 @@ func (a *app) compactRow(c *ui.Context, p pal, i int) {
 	m := a.rows[i]
 	sel := a.hasCur && a.cur.ID == m.ID
 	b := ui.ButtonBase(c).FillWidth().MinHeight(44).Gap(12).Padding(0, 12).Radius(12).Justify(ui.Start).Label(m.Subject).Key(m.ID)
+	if a.veiled(m.ID, false) {
+		a.near(c, b, m.ID, false, rowMargin)
+	}
 	b.Children(func() {
-		maskedText(c, p, m.Subject, 0, weight(!m.Seen, 500, 400), p.ink).SingleLine().Grow(1).MinWidth(0)
+		if a.veiled(m.ID, false) {
+			bone(c, 14, 55, a.asked[veilKey{m.ID, false, a.v}]).Grow(1).MinWidth(0)
+		} else {
+			maskedText(c, p, m.Subject, 0, weight(!m.Seen, 500, 400), p.ink).SingleLine().Grow(1).MinWidth(0)
+		}
 		muted(c, p, when(m.Date)).FontSize(12)
 	})
 	switch {
@@ -452,14 +534,27 @@ func (a *app) readerPane(c *ui.Context, p pal) {
 		if a.priv.View {
 			a.maskBanner(c, p)
 		}
-		maskedText(c, p, a.cur.Subject, 24, 600, p.ink).LineHeight(1.35)
-		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Children(func() {
+		if a.veiled(a.cur.ID, false) {
+			bone(c, 24, 46, true)
+		} else {
+			maskedText(c, p, a.cur.Subject, 24, 600, p.ink).LineHeight(1.35)
+		}
+		// One beam at a time: on the first mail the model is reading.
+		lit := int64(0)
+		for _, m := range a.thread {
+			if _, ok := a.pendAt[m.ID]; ok && a.veiled(m.ID, true) {
+				lit = m.ID
+				break
+			}
+		}
+		// The scroll bar runs in the pane's margin, clear of the mails.
+		ui.Scroll(c).Grow(1).Margin(0, -scrollGutter, 0, 0).Children(func() {
+			ui.Column(c).Padding(0, scrollGutter, 0, 0).Children(func() {
 				for i, m := range a.thread {
 					if i > 0 { // a line between mails, plain enough to find the next one
 						ui.Box(c).Height(1).Background(p.rule).Margin(28, 0)
 					}
-					a.message(c, p, m)
+					a.message(c, p, m, m.ID == lit)
 				}
 			})
 		})
@@ -508,6 +603,8 @@ func (a *app) maskBanner(c *ui.Context, p pal) {
 	switch {
 	case a.hiding:
 		text = "正在识别敏感信息…"
+	case a.rest > 0:
+		text += fmt.Sprintf("，其余 %d 封滚动到时识别", a.rest)
 	case a.hidden == 0:
 		text = "已打码，这封邮件里没有发现敏感信息"
 	}
@@ -612,8 +709,16 @@ func loadImage(url string) (ui.ImageSource, error) {
 	return ui.DecodeImage(b)
 }
 
-func (a *app) message(c *ui.Context, p pal, m store.Message) {
-	ui.Column(c).Gap(20).Children(func() {
+// message shows a mail of the thread. One still to be hidden shows as a card
+// of lines to come; lit, it is the one the beam goes around while the model
+// reads it. One just hidden after such a wait is crossed by the wave.
+func (a *app) message(c *ui.Context, p pal, m store.Message, lit bool) {
+	col := ui.Column(c).Gap(20).Key(m.ID)
+	veiled := a.veiled(m.ID, true)
+	if veiled {
+		a.near(c, col.MinHeight(mailHold), m.ID, true, mailMargin)
+	}
+	col.Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
 			avatar(c, p, who(m), 40, true)
 			ui.Column(c).Children(func() {
@@ -621,16 +726,43 @@ func (a *app) message(c *ui.Context, p pal, m store.Message) {
 				muted(c, p, fmt.Sprintf("%s · %s · %s", m.FromAddr, a.acctByID(m.AccountID), whenLong(m.Date)))
 			})
 		})
-		if pg := a.pages[m.ID]; pg != nil {
-			ui.WebView(c, pg.view).Height(float32(pg.h.Load())).Radius(8)
-		} else {
-			if a.priv.View && m.HTML == "" {
-				plainBody(c, p, m.Body)
-			} else {
-				ui.Column(c).MaxWidth(680).Children(func() {
-					markdown.Markdown(c, m.Body, markdown.MarkdownProps{FontSize: 15, LineHeight: 1.7, HeaderMultiple: 0.4, MarginMultiple: 1.2, LoadImage: loadImage, OnLink: a.openLink})
+		switch pg := a.pages[pageKey{m.ID, a.v}]; {
+		case veiled:
+			a.mailHolder(c, p, m.ID, lit)
+		case pg != nil:
+			wv := ui.WebView(c, pg.view).Height(float32(pg.h.Load())).Radius(8)
+			// A page's pixels cannot be moved: the wave's light goes over it,
+			// once the page is laid out.
+			if at, ok := a.waving(c, m.ID, pg.laid.Load()); ok {
+				wv.Children(func() {
+					// The box around it cuts the light to the page's corners.
+					ui.Box(c).Absolute().Fill().Radius(8).Clip().IgnoreInput(true).Children(func() {
+						ui.Box(c).Fill().Draw(func(pt *ui.Painter, r ui.Rect) {
+							// The wave crosses what shows of the page: across
+							// all of a long one it would pass the window in a
+							// frame.
+							v := pt.Visible()
+							top, bottom := max(r.Y, v.Y), min(r.Y+r.H, v.Y+v.H)
+							if bottom > top {
+								r.Y, r.H = top, bottom-top
+							}
+							waveOverlay(pt, r, pt.Now().Sub(at), ui.RGB(255, 255, 255))
+						})
+					})
 				})
 			}
+		default:
+			body := ui.Column(c).MaxWidth(680)
+			if at, ok := a.waving(c, m.ID, true); ok {
+				body.Effect(waveEffect(c, c.Now().Sub(at)))
+			}
+			body.Children(func() {
+				if a.priv.View && m.HTML == "" {
+					plainBody(c, p, m.Body)
+				} else {
+					markdown.Markdown(c, m.Body, markdown.MarkdownProps{FontSize: 15, LineHeight: 1.7, HeaderMultiple: 0.4, MarginMultiple: 1.2, LoadImage: loadImage, OnLink: a.openLink})
+				}
+			})
 		}
 		if m.HandledBy == store.ActorAgent && m.Seen {
 			ui.Row(c).AlignItems(ui.Center).Gap(8).MaxWidth(640).Padding(16, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(p.hair).Children(func() {
@@ -639,6 +771,58 @@ func (a *app) message(c *ui.Context, p pal, m store.Message) {
 			})
 		}
 	})
+}
+
+// mailHolder stands for the body of a mail still to be hidden: a card of the
+// lines to come. While the model reads the mail the lines pulse, and once it
+// has waited long enough to be seen (beamDelay) the beam goes around the
+// card, when it is the lit one.
+func (a *app) mailHolder(c *ui.Context, p pal, id int64, lit bool) {
+	since, reading := a.pendAt[id]
+	anim := display.SkeletonStatic
+	if reading {
+		anim = display.SkeletonFade
+	}
+	card := ui.Column(c).MaxWidth(680).Padding(22, 24).Radius(holderRadius).Background(p.card).Border(1, p.hair)
+	if lit && reading {
+		if wait := beamDelay - time.Since(since); wait > 0 {
+			c.After(wait)
+		} else {
+			dark := p.dark
+			card.DrawOver(func(pt *ui.Painter, r ui.Rect) {
+				on := time.Since(since) - beamDelay
+				beam(pt, r, holderRadius, on.Seconds(), min(float32(on)/float32(beamFade), 1), dark)
+			})
+		}
+	}
+	card.Children(func() {
+		display.SkeletonText(c, display.SkeletonTextProps{Rows: 5, FontSize: 15, Animation: anim})
+	})
+}
+
+const holderRadius = 14
+
+// scrollGutter is the room the reader's scroll bar has beside the mails.
+const scrollGutter = 16
+
+// waving reports whether the wave is crossing the mail of id, and since when.
+// The wave begins with the first frame that can draw it: ready says the mail
+// is laid out. It keeps the frames coming while it runs.
+func (a *app) waving(c *ui.Context, id int64, ready bool) (time.Time, bool) {
+	at, ok := a.waveAt[id]
+	if !ok || !ready {
+		return at, false
+	}
+	if at.IsZero() {
+		at = c.Now()
+		a.waveAt[id] = at
+	}
+	if c.Now().Sub(at) >= waveDuration || c.Preferences().ReduceMotion {
+		delete(a.waveAt, id)
+		return at, false
+	}
+	c.After(time.Second / 60)
+	return at, true
 }
 
 // feedbackItem opens the project's new-issue page in the browser, where the

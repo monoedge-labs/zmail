@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/monoedge-labs/zmail/internal/guard"
 	"github.com/monoedge-labs/zmail/internal/mailbox"
+	"github.com/monoedge-labs/zmail/internal/redact"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
@@ -450,5 +452,40 @@ func TestAgentReadsWithModel(t *testing.T) {
 		if !strings.Contains(b, want) {
 			t.Errorf("body lacks %s: %s", want, b)
 		}
+	}
+}
+
+// A text the model has read is not read again, an empty answer included; a
+// model of another revision starts clean.
+func TestStoredModel(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	calls := 0
+	inner := func(text string) ([]redact.Found, bool) {
+		calls++
+		if text == "nothing" {
+			return nil, true
+		}
+		return []redact.Found{{Start: 1, End: 3, Kind: redact.Person}}, true
+	}
+	m := storedModel(st, "r1", inner)
+	first, _ := m("a name")
+	if again, ok := m("a name"); !ok || !slices.Equal(first, again) || calls != 1 {
+		t.Errorf("second read = %v %v after %d calls, want %v from the store", again, ok, calls, first)
+	}
+	m("nothing")
+	if found, ok := m("nothing"); !ok || len(found) != 0 || calls != 2 {
+		t.Errorf("empty answer = %v %v after %d calls, want it kept", found, ok, calls)
+	}
+	storedModel(st, "r2", inner)("a name")
+	if calls != 3 {
+		t.Errorf("another revision made %d calls, want 3", calls)
+	}
+	storedModel(nil, "r1", inner)("a name")
+	if calls != 4 {
+		t.Errorf("no store made %d calls, want 4", calls)
 	}
 }

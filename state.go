@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -23,13 +24,33 @@ type app struct {
 	st  *store.Store
 	svc *mailbox.Service
 
-	dir  string  // where privacy.json lives; empty keeps the choice in memory
-	priv privacy // what is hidden: the window's choice is View, the agent's is Agent
-	vm   *viewModel
-	dl   download
+	dir    string  // where privacy.json lives; empty keeps the choice in memory
+	dbPath string  // the database's file, "" in memory
+	priv   privacy // what is hidden: the window's choice is View, the agent's is Agent
+	vm     *viewModel
+	dl     download
 
 	hidden int  // values hidden in the thread shown, of each message as its own count
-	hiding bool // the model has yet to read some of it
+	hiding bool // the model has yet to read some of what shows
+	rest   int  // messages of the thread not hidden yet: they are once scrolled to
+
+	// A message is hidden when it comes into view, and its hidden copy kept:
+	// a message's text never changes, so one is made once for each way of
+	// hiding. Until it has one, a message shows as "…", never as its text.
+	veils     map[veilKey]veil
+	veilBytes int
+	want      map[veilKey]bool // in view and without a copy: made before the next frame
+	asked     map[veilKey]bool // the model is reading them: asked again once it has read more
+	// The mails of the thread the model is reading, since when: one read for
+	// long enough to be seen waiting is lit by the beam, and crossed by the
+	// wave once it is hidden. waveAt is when that wave began, zero until the
+	// frame that first draws it.
+	pendAt, waveAt map[int64]time.Time
+	v              variant   // how messages show in the frame being built
+	late           bool      // this frame held a message without a copy that the frame before did not show
+	settleAt       time.Time // when the frame that finds what the last ones showed is due
+	noPages        bool      // web views cannot be made here: HTML mail shows as its Markdown
+	stamp          string    // the database's files as the last reload found them
 
 	router *ui.Router
 	nav    string // the sidebar's choice
@@ -44,8 +65,8 @@ type app struct {
 	cur         store.Message // the message shown, valid while hasCur
 	hasCur      bool
 	thread      []store.Message
-	pages       map[int64]*mailPage // web views of the thread's messages with HTML
-	face        *agentFace          // the agent's face on the statistics page
+	pages       map[pageKey]*mailPage // web views of the thread's messages with HTML, of each way they showed
+	face        *agentFace            // the agent's face on the statistics page
 	moveOpen    bool
 	newsOpen    bool
 	focusSearch bool
@@ -119,9 +140,11 @@ func newApp(st *store.Store, svc *mailbox.Service) *app {
 	a := &app{
 		st: st, svc: svc,
 		router: ui.NewRouter("/mail"), nav: "mail:inbox", sel: -1, listW: 380,
-		unread: map[string]int{}, pages: map[int64]*mailPage{},
+		unread: map[string]int{}, pages: map[pageKey]*mailPage{},
+		veils: map[veilKey]veil{}, want: map[veilKey]bool{}, asked: map[veilKey]bool{},
+		pendAt: map[int64]time.Time{}, waveAt: map[int64]time.Time{},
 	}
-	a.vm = &viewModel{dir: a.modelFiles, done: a.refresh, windowed: func() bool { return a.win != nil }}
+	a.vm = &viewModel{dir: a.modelFiles, done: a.refresh, windowed: func() bool { return a.win != nil }, st: st}
 	a.router.Animation = &ui.Snappy
 	a.list.Selected = &a.sel
 	a.list.Key = func(i int) any { return a.rows[i].ID }
@@ -135,6 +158,30 @@ func (a *app) refresh() {
 	if a.win != nil {
 		a.win.Update(a.reload)
 	}
+}
+
+// poll reloads when another process wrote to the database, as `zmail account
+// add` or an agent's command does: its files changed since the last reload.
+// Nothing is read or drawn otherwise. Any goroutine may call it.
+func (a *app) poll() {
+	mygo.RunOnMain(func() {
+		if dbStamp(a.dbPath) != a.stamp {
+			a.reload()
+			a.win.Invalidate()
+		}
+	})
+}
+
+// dbStamp tells the state of a database's files: the size and time of the
+// file and of its write-ahead log, where every write lands first.
+func dbStamp(path string) string {
+	var b strings.Builder
+	for _, p := range []string{path, path + "-wal"} {
+		if fi, err := os.Stat(p); err == nil {
+			fmt.Fprint(&b, fi.Size(), fi.ModTime().UnixNano(), ";")
+		}
+	}
+	return b.String()
 }
 
 // async runs work off the main thread, shows its error and reloads.
@@ -158,6 +205,7 @@ func (a *app) async(work func() error) {
 
 // reload reads what the pages show from the store. Main thread only.
 func (a *app) reload() {
+	a.stamp = dbStamp(a.dbPath)
 	a.accounts, _ = a.st.Accounts()
 	if fs, err := a.st.Folders(""); err == nil {
 		a.folders = a.folders[:0]
@@ -190,7 +238,11 @@ func (a *app) reload() {
 		q.Role = store.RoleInbox
 	}
 	a.rows, _ = a.st.Search(q)
-	a.maskAll(a.rows)
+	clear(a.asked) // the model may have read more since
+	v := a.variant()
+	for i := range a.rows {
+		a.show(&a.rows[i], false, v, false)
+	}
 
 	// Keep the message shown chosen where it now is.
 	a.sel = -1
@@ -201,10 +253,10 @@ func (a *app) reload() {
 			}
 		}
 		if m, err := a.st.Get(a.cur.ID); err == nil {
-			a.mask(&m)
+			a.show(&m, false, v, true)
 			a.cur = m
 			a.thread, _ = a.st.Thread(m.ID)
-			a.hidden, a.hiding = a.maskAll(a.thread)
+			a.showThread()
 		} else {
 			a.hasCur, a.thread = false, nil
 		}
@@ -216,40 +268,218 @@ func (a *app) reload() {
 	a.syncFace()
 }
 
-// mask hides the private values in the texts of m, when the window is set
-// to. A message is masked on its way from the store, so every page, the list
-// and the web views alike, shows it hidden. With the local model on, the
-// model reads the texts in the background: until it has, a message shows as
-// "…" or a notice, never as the text.
-func (a *app) mask(m *store.Message) (hidden int, pending bool) {
-	if !a.priv.View {
-		return 0, false
+// variant is a way a message shows: as it is, or with its values hidden by
+// the patterns, or by the patterns and the local model.
+type variant uint8
+
+const (
+	asIs variant = iota
+	byPatterns
+	byModel
+)
+
+// variant is how messages show now.
+func (a *app) variant() variant {
+	switch {
+	case !a.priv.View:
+		return asIs
+	case a.useModel():
+		return byModel
 	}
+	return byPatterns
+}
+
+// veilKey names a hidden copy of a message: of its subject and snippet, which
+// a list shows, or of all of it.
+type veilKey struct {
+	id   int64
+	full bool
+	v    variant
+}
+
+// veil is a message's texts with their values hidden, and how many they were.
+type veil struct {
+	subject, snippet, body, html string
+	hidden                       int
+}
+
+// veilBudget is how much text the hidden copies hold before they are dropped.
+// ponytail: they are dropped all at once, and made again as they show; drop
+// the oldest first if that is ever felt.
+const veilBudget = 64 << 20
+
+// hide makes the hidden copy of m. With the local model on, the model reads
+// the texts in the background: pending says it has yet to, and the copy is
+// then the patterns' work alone, not to be shown.
+func (a *app) hide(m store.Message, full bool, v variant) (e veil, pending bool) {
 	h := redact.New()
-	if a.useModel() {
+	if v == byModel {
 		h.Model = a.vm.find
 	}
 	t := h.Texts(m.Subject, m.Snippet)
-	m.Subject, m.Snippet = t[0], t[1]
-	if m.HTML != "" {
-		// The page is what is shown, and read first (the model reads the
-		// newest ask first); the Markdown body shows only where the page
-		// cannot be made, and has its own reading, which waits for none.
-		b := redact.New()
-		b.Model = h.Model
-		m.Body = b.Text(m.Body)
-		if b.Pending {
-			m.Body = "正在识别敏感信息…"
+	e.subject, e.snippet = t[0], t[1]
+	switch {
+	case !full:
+	case m.HTML == "":
+		e.body = h.Text(m.Body)
+	default:
+		e.html = h.HTML(m.HTML)
+		// The page is what shows. The Markdown body shows only where no web
+		// view can be made, and is read only there: the model takes as long
+		// over it as over the page.
+		if a.win == nil || a.noPages {
+			b := redact.New()
+			b.Model = h.Model
+			e.body = b.Text(m.Body)
+			pending = b.Pending
 		}
-		m.HTML = h.HTML(m.HTML)
-	} else {
-		m.Body = h.Text(m.Body)
 	}
-	if !h.Pending {
-		return h.Distinct(), false
+	e.hidden = h.Distinct()
+	return e, pending || h.Pending
+}
+
+// show puts in m, as the store gave it, what the window may show of it: m as
+// it is when nothing is hidden, else its hidden copy. A message without a
+// copy gets one at once when now is set, as what is surely in view does; the
+// others show as "…" until the view finds them in view (see near). It
+// reports whether m shows.
+func (a *app) show(m *store.Message, full bool, v variant, now bool) bool {
+	if v == asIs {
+		return true
 	}
-	m.Subject, m.Snippet, m.Body, m.HTML = "…", "", "正在识别敏感信息…", ""
-	return 0, true
+	k := veilKey{m.ID, full, v}
+	e, ok := a.veils[k]
+	if !ok && now && !a.asked[k] {
+		var pending bool
+		if e, pending = a.hide(*m, full, v); pending {
+			a.pend(k)
+		} else {
+			a.keep(k, e)
+			ok = true
+		}
+	}
+	if !ok {
+		m.Subject, m.Snippet, m.Body, m.HTML = "…", "", "正在识别敏感信息…", ""
+		return false
+	}
+	m.Subject, m.Snippet, m.Body, m.HTML = e.subject, e.snippet, e.body, e.html
+	return true
+}
+
+// pend notes that the model is reading the message of k.
+func (a *app) pend(k veilKey) {
+	a.asked[k] = true
+	if _, ok := a.pendAt[k.id]; k.full && !ok {
+		a.pendAt[k.id] = time.Now()
+	}
+}
+
+// keep keeps the hidden copy of k. A mail that was seen waiting for it is
+// crossed by the wave as it shows.
+func (a *app) keep(k veilKey, e veil) {
+	if t, ok := a.pendAt[k.id]; ok && k.full {
+		delete(a.pendAt, k.id)
+		if time.Since(t) >= beamDelay {
+			a.waveAt[k.id] = time.Time{}
+		}
+	}
+	if a.veilBytes > veilBudget {
+		clear(a.veils)
+		a.veilBytes = 0
+	}
+	a.veils[k] = e
+	a.veilBytes += len(e.subject) + len(e.snippet) + len(e.body) + len(e.html)
+}
+
+// showThread shows the thread as the store gave it: its first message at
+// once, as it is the one in view when the thread opens, the others as they
+// are scrolled to. It counts what is hidden in those that show.
+func (a *app) showThread() {
+	v := a.variant()
+	a.hidden, a.hiding, a.rest = 0, false, 0
+	for i := range a.thread {
+		k := veilKey{a.thread[i].ID, true, v}
+		switch {
+		case a.show(&a.thread[i], true, v, i == 0):
+			a.hidden += a.veils[k].hidden
+		case a.asked[k]:
+			a.hiding = true
+		default:
+			a.rest++
+		}
+	}
+}
+
+// veiled reports whether a message shows as "…" for want of a hidden copy.
+func (a *app) veiled(id int64, full bool) bool {
+	_, ok := a.veils[veilKey{id, full, a.v}]
+	return a.v != asIs && !ok
+}
+
+// near is called by the view for a message without a hidden copy, with the
+// element that shows it: one in view, or within margin of it, is given its
+// copy before the next frame. An element tells whether it showed in the
+// frame before, so one new to the window, or scrolled to in one jump, is
+// found a frame late: view asks for that frame.
+func (a *app) near(c *ui.Context, el ui.Element, id int64, full bool, margin float32) {
+	k := veilKey{id, full, a.v}
+	switch {
+	case a.asked[k]:
+	case el.InViewMargin(margin):
+		a.want[k] = true
+		c.Invalidate()
+	default:
+		a.late = true
+	}
+}
+
+// unveil hides the messages the last frame found in view, and shows them.
+// Their text is read from the store again: the window held none of it.
+func (a *app) unveil() {
+	if len(a.want) == 0 {
+		return
+	}
+	v := a.v
+	for k := range a.want {
+		delete(a.want, k)
+		if _, ok := a.veils[k]; ok || k.v != v {
+			continue
+		}
+		m, err := a.st.Get(k.id)
+		if err != nil {
+			continue
+		}
+		if e, pending := a.hide(m, k.full, v); pending {
+			a.pend(k)
+		} else {
+			a.keep(k, e)
+		}
+	}
+	for i := range a.rows {
+		if e, ok := a.veils[veilKey{a.rows[i].ID, false, v}]; ok {
+			a.rows[i].Subject, a.rows[i].Snippet = e.subject, e.snippet
+		}
+	}
+	if a.hasCur {
+		if e, ok := a.veils[veilKey{a.cur.ID, false, v}]; ok {
+			a.cur.Subject, a.cur.Snippet = e.subject, e.snippet
+		}
+	}
+	a.hidden, a.hiding, a.rest = 0, false, 0
+	for i := range a.thread {
+		m := &a.thread[i]
+		k := veilKey{m.ID, true, v}
+		switch e, ok := a.veils[k]; {
+		case ok:
+			m.Subject, m.Snippet, m.Body, m.HTML = e.subject, e.snippet, e.body, e.html
+			a.hidden += e.hidden
+		case a.asked[k]:
+			a.hiding = true
+		default:
+			a.rest++
+		}
+	}
+	a.syncPages()
 }
 
 // useModel says whether the local model reads what is hidden now: it is on,
@@ -281,17 +511,9 @@ func (a *app) maskNote() (note, act string) {
 	return "识别模型还没有下载：姓名和地址没有隐藏", "下载"
 }
 
-// maskAll masks messages, newest asked last, and counts what it hid.
-func (a *app) maskAll(ms []store.Message) (hidden int, pending bool) {
-	for i := len(ms) - 1; i >= 0; i-- {
-		n, w := a.mask(&ms[i])
-		hidden, pending = hidden+n, pending || w
-	}
-	return hidden, pending
-}
-
-// setPrivacy applies and keeps a change of what is hidden. The web views are
-// made again: their pages hold the old text.
+// setPrivacy applies and keeps a change of what is hidden. The web views of
+// the thread stay, those of the text as it was and of it hidden alike, and
+// so do the hidden copies: switching back shows them at once.
 func (a *app) setPrivacy(p privacy) {
 	if p == a.priv {
 		return
@@ -305,10 +527,6 @@ func (a *app) setPrivacy(p privacy) {
 		}
 	}
 	if viewChanged {
-		for id, pg := range a.pages {
-			pg.view.Destroy()
-			delete(a.pages, id)
-		}
 		a.reload()
 	}
 }
@@ -354,8 +572,10 @@ func (a *app) open(i int) {
 		return
 	}
 	a.cur, a.hasCur = a.rows[i], true
+	clear(a.pendAt)
+	clear(a.waveAt)
 	a.thread, _ = a.st.Thread(a.cur.ID)
-	a.hidden, a.hiding = a.maskAll(a.thread)
+	a.showThread()
 	a.syncPages()
 	if !a.cur.Seen {
 		id := a.cur.ID

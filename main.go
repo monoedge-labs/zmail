@@ -62,9 +62,10 @@ func main() {
 	}
 	a := newApp(st, svc)
 	if !*demo {
-		a.dir, a.priv, a.sec = dir, loadPrivacy(dir), keychain{}
+		a.dir, a.dbPath, a.priv, a.sec = dir, dbPath, loadPrivacy(dir), keychain{}
 	}
 	svc.Changed = a.refresh
+	useUpdater(*demo)
 
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
@@ -89,7 +90,7 @@ func main() {
 					case <-ctx.Done():
 						return
 					case <-t.C:
-						a.refresh()
+						a.poll()
 					}
 				}
 			}()

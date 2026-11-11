@@ -56,6 +56,38 @@ NOTARY_PROFILE=your-notarytool-profile scripts/release.sh
 
 Try the window with sample mail, touching no server: `zmail -demo`.
 
+## Updates
+
+Zmail checks for a new version in the background, 10 seconds after it opens
+and then once a day, and when you choose **Check for Updates…** in the app
+menu. A new version shows its release notes, and you install it, skip it or
+ask to be reminded later. Updates come from this repository's
+[GitHub releases](https://github.com/monoedge-labs/zmail/releases). Each one
+is signed, and Zmail verifies the signature against the public key built into
+the app before it replaces itself. A check asks GitHub for the latest release
+and sends no mail or account data. `zmail -demo` never checks in the
+background.
+
+Zmail 0.4.0 and older have no key built in, so they update by hand once:
+download the disk image of the next release and drag Zmail to Applications.
+From that version on the app updates itself.
+
+Maintainers: `scripts/release.sh` signs the update files with the key from
+`mygo keygen`, read from `$MYGO_UPDATER_PRIVATE_KEY`, else from
+`~/Library/Application Support/mygo/update-keys/mygo-update.key`. A
+`.env.release` file at the root of the repository, which Git ignores, may set
+`MYGO_UPDATER_PRIVATE_KEY`, `MACOS_SIGNING_IDENTITY` and `NOTARY_PROFILE` for
+your machine; the script reads it first. The public
+key is `updates.publicKey` in `mygo.json`. The secret key stays out of the
+repository, because apps accept only updates signed with it. Without the key
+the build skips the update files. `CHANGELOG.md` needs a `## <version>`
+section for every version you release, which becomes the release notes in the
+update window; a signed build fails without it. With the signing and
+notarization variables above, `scripts/release.sh -upload` uploads the disk
+image and the update files to a draft release. Apps see a version once its
+release is published (`gh release edit vX.Y.Z --draft=false`); a draft stays
+invisible to them.
+
 ## Add accounts
 
 Passwords are never taken from the command line, where other programs could read
