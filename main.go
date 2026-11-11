@@ -65,6 +65,7 @@ func main() {
 		a.dir, a.priv, a.sec = dir, loadPrivacy(dir), keychain{}
 	}
 	svc.Changed = a.refresh
+	useUpdater(*demo)
 
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{

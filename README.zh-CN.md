@@ -43,6 +43,14 @@ NOTARY_PROFILE=your-notarytool-profile scripts/release.sh
 
 不连接任何服务器、用示例邮件试用窗口：`zmail -demo`。
 
+## 更新
+
+Zmail 会在后台检查新版本：打开 10 秒后检查一次，之后每天一次；你也可以在应用菜单里点“检查更新…”。发现新版本时，窗口会显示更新说明，你可以安装、跳过此版本或稍后提醒。更新来自本仓库的 [GitHub Releases](https://github.com/monoedge-labs/zmail/releases)。每个更新都带签名，Zmail 先用内置的公钥验证签名，再替换自己。检查只向 GitHub 询问最新的发布，不发送邮件或账户数据。`zmail -demo` 不会在后台检查。
+
+0.4.0 及更早的版本没有内置公钥，需要手动更新一次：下载下一个发布的磁盘映像，把 Zmail 拖进“应用程序”。从那个版本起，应用会自己更新。
+
+维护者：`scripts/release.sh` 用 `mygo keygen` 生成的密钥给更新文件签名，密钥取自 `$MYGO_UPDATER_PRIVATE_KEY`，没有设置时取自 `~/Library/Application Support/mygo/update-keys/mygo-update.key`。仓库根目录下的 `.env.release`（Git 已忽略）可以为本机设置 `MYGO_UPDATER_PRIVATE_KEY`、`MACOS_SIGNING_IDENTITY` 和 `NOTARY_PROFILE`，脚本会先读取它。对应的公钥是 `mygo.json` 里的 `updates.publicKey`。私钥不要放进仓库，因为应用只接受用它签名的更新。没有密钥时，构建会跳过更新文件。每个发布的版本都要在 `CHANGELOG.md` 里有一节 `## <版本号>`，它会成为更新窗口里的更新说明；带签名的构建缺少这一节会失败。设置好上文的签名和公证变量后，`scripts/release.sh -upload` 会把磁盘映像和更新文件上传到一个草稿 release。发布后应用才能看到该版本（`gh release edit vX.Y.Z --draft=false`），草稿对应用不可见。
+
 ## 添加账户
 
 密码从不通过命令行参数传入，因为其他程序能读到命令行。密码来自标准输入、`$ZMAIL_PASSWORD` 或窗口。
