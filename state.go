@@ -27,6 +27,7 @@ type app struct {
 	dir    string  // where privacy.json lives; empty keeps the choice in memory
 	dbPath string  // the database's file, "" in memory
 	priv   privacy // what is hidden: the window's choice is View, the agent's is Agent
+	prefs  prefs   // the window's own choices
 	vm     *viewModel
 	dl     download
 
@@ -59,6 +60,9 @@ type app struct {
 	query       string
 	cat         int // 0 all, then catNames
 	rows        []store.Message
+	labels      map[int64][]string // the labels of rows, which an agent put on them
+	anyLabel    bool               // some mail has a label: the list can be grouped by it
+	rowGroup    int                // the group whose rows are being drawn, 0 for the category groups: a mail in two groups needs two keys
 	list        ui.ListState
 	sel         int // the list's chosen row, -1 for none
 	listW       float32
@@ -238,6 +242,13 @@ func (a *app) reload() {
 		q.Role = store.RoleInbox
 	}
 	a.rows, _ = a.st.Search(q)
+	ids := make([]int64, len(a.rows))
+	for i, m := range a.rows {
+		ids[i] = m.ID
+	}
+	a.labels, _ = a.st.Labels(ids)
+	counts, _ := a.st.LabelCounts()
+	a.anyLabel = len(counts) > 0
 	clear(a.asked) // the model may have read more since
 	v := a.variant()
 	for i := range a.rows {

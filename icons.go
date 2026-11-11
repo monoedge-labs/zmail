@@ -14,6 +14,7 @@ var (
 	icoArchive     = lucide.Archive()
 	icoFolder      = lucide.Folder()
 	icoJunk        = lucide.MailWarning()
+	icoTags        = lucide.Tags()
 	icoShield      = lucide.ShieldCheck()
 	icoShieldOff   = lucide.ShieldOff()
 	icoMove        = lucide.FolderInput()

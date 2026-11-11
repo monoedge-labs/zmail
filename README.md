@@ -138,13 +138,15 @@ zmail providers --json           # providers, their credential and help page
 zmail issue --print --json       # the address of a prefilled GitHub issue; no browser
 
 zmail search --json [--query Q] [--account ADDR] [--folder F] \
-    [--category person|notification|newsletter] [--unread] [--since-days N] [--limit N]
+    [--category person|notification|newsletter] [--label L] [--unread] [--since-days N] [--limit N]
 zmail read ID --json             # the whole conversation, bodies cut at 6000 characters
 zmail folders --json             # names, and the role of each: inbox, sent, archive, junk, other
 zmail stats --json [--days N]    # 7 days by default
 zmail mark-read [--unread] ID... --json
 zmail archive ID --json          # the whole conversation
 zmail move --folder F [--create] ID... --json
+zmail label add|remove --label L [--label L2] ID... --json   # put labels on mail, or take them off
+zmail label list --json          # the labels in use, and how many messages carry each
 ```
 
 `search` returns snippets, newest first: 20 by default, 100 at most. Put flags
@@ -152,7 +154,13 @@ before IDs. `move` files mail in a folder the account already has, and
 `--folder junk` means the account's junk folder, whatever its server calls it;
 a name no folder has is an error unless `--create` says to make one. `search`
 leaves junk out unless `--folder` names it. `move` refuses Trash and Drafts, and
-nothing sends, replies or deletes. Every call is logged as the `cli` client and counted in the window's
+nothing sends, replies or deletes. A label is free text of up to 40 characters
+(`ads`, `to reply`), kept in the local database only and never sent to the mail
+server; `search` and `read` show each message's `labels`, and `search --label L`
+finds mail by one. Once some mail has a label, the list's header shows a button
+that groups the list by label (a message with several labels stands in each
+group, the unlabeled ones under "未标记"); the choice is kept in `prefs.json`
+beside the database. Every call is logged as the `cli` client and counted in the window's
 statistics. Give your agent the guide, for example
 `zmail skill > ~/.claude/skills/zmail/SKILL.md`, or tell it to run `zmail skill`.
 

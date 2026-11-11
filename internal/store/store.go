@@ -68,6 +68,7 @@ type Query struct {
 	Folder    string
 	Role      string
 	Category  string
+	Label     string // only messages carrying this label
 	Unread    bool
 	Since     time.Time
 	Limit     int
@@ -128,6 +129,12 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_date ON messages (date DESC);
 CREATE INDEX IF NOT EXISTS messages_thread ON messages (account_id, thread_key);
+CREATE TABLE IF NOT EXISTS labels (
+	message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+	label TEXT NOT NULL,
+	PRIMARY KEY (message_id, label)
+);
+CREATE INDEX IF NOT EXISTS labels_label ON labels (label);
 CREATE TABLE IF NOT EXISTS ops (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	ts INTEGER NOT NULL, actor TEXT NOT NULL, client TEXT NOT NULL,
@@ -219,6 +226,7 @@ func (s *Store) Accounts() ([]Account, error) {
 
 func (s *Store) DeleteAccount(id string) error {
 	for _, q := range []string{
+		`DELETE FROM labels WHERE message_id IN (SELECT id FROM messages WHERE account_id = ?)`,
 		`DELETE FROM messages WHERE account_id = ?`,
 		`DELETE FROM folders WHERE account_id = ?`,
 		`DELETE FROM accounts WHERE id = ?`,
@@ -331,6 +339,9 @@ func (s *Store) Search(q Query) ([]Message, error) {
 	if q.Category != "" {
 		add(`category = ?`, q.Category)
 	}
+	if q.Label != "" {
+		add(`id IN (SELECT message_id FROM labels WHERE label = ?)`, q.Label)
+	}
 	if q.Unread {
 		add(`seen = 0`)
 	}
@@ -425,6 +436,10 @@ func (s *Store) UnreadCounts() (map[string]int, error) {
 
 // DeleteMessage forgets a message locally. The server's copy is untouched.
 func (s *Store) DeleteMessage(id int64) error {
+	// The labels go with it. The table cascades too, but only where foreign keys are on.
+	if _, err := s.db.Exec(`DELETE FROM labels WHERE message_id=?`, id); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`DELETE FROM messages WHERE id=?`, id)
 	return err
 }

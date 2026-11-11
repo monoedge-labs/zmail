@@ -489,3 +489,67 @@ func TestStoredModel(t *testing.T) {
 		t.Errorf("no store made %d calls, want 4", calls)
 	}
 }
+
+// An agent labels mail, finds it by label, and sees the labels on what it
+// reads; labels are the user's too, so they show in the log.
+func TestLabelCLI(t *testing.T) {
+	dir := t.TempDir()
+	seedMail(t, dir, 0)
+	all := search(t, dir)
+	id := map[string]string{}
+	for _, m := range all {
+		id[m.Subject] = fmt.Sprint(m.ID)
+	}
+
+	if _, err := run(t, dir, memSecrets{}, "", "label", "add", "--label", "广告", "--label", " 促销 ", id["Build passed"], id["From QQ"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, dir, memSecrets{}, "", "label", "add", "--label", "待回复", id["Build passed"]); err != nil {
+		t.Fatal(err)
+	}
+
+	got := search(t, dir, "--label", "广告")
+	if len(got) != 2 {
+		t.Fatalf("search --label found %d", len(got))
+	}
+	for _, m := range got {
+		if m.Subject == "Build passed" && !slices.Equal(m.Labels, []string{"促销", "广告", "待回复"}) { // sorted, and trimmed on the way in
+			t.Errorf("labels of the build mail: %v", m.Labels)
+		}
+	}
+	if len(search(t, dir, "--label", "没有")) != 0 {
+		t.Error("an unused label found mail")
+	}
+	if plain, _ := run(t, dir, memSecrets{}, "", "search", "--label", "待回复"); !strings.Contains(plain, "[促销, 广告, 待回复]") {
+		t.Errorf("the plain listing shows no labels:\n%s", plain)
+	}
+
+	var list struct{ Labels []labelItem }
+	if err := jsonRun(t, dir, &list, "label", "list"); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Labels) != 3 || list.Labels[0] != (labelItem{"促销", 2}) { // equal counts: by name
+		t.Errorf("label list = %+v", list.Labels)
+	}
+
+	var thread found
+	if err := jsonRun(t, dir, &thread, "read", id["Build passed"]); err != nil || len(thread.Messages[0].Labels) != 3 {
+		t.Errorf("read: err=%v, %+v", err, thread.Messages)
+	}
+
+	if _, err := run(t, dir, memSecrets{}, "", "label", "remove", "--label", "广告", id["Build passed"]); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(search(t, dir, "--label", "广告")); n != 1 {
+		t.Errorf("after remove: %d", n)
+	}
+
+	for _, bad := range [][]string{
+		{"label"}, {"label", "add", id["From QQ"]}, {"label", "add", "--label", "x"}, {"label", "add", "--label", "", id["From QQ"]},
+		{"label", "add", "--label", "x", "99999"}, {"label", "list", "stray"}, {"label", "rename"},
+	} {
+		if _, err := run(t, dir, memSecrets{}, "", bad...); err == nil {
+			t.Errorf("%v: no error", bad)
+		}
+	}
+}

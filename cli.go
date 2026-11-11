@@ -49,7 +49,7 @@ const cliUsage = `zmail — a local mail client for agents
                                          in the browser, for the user to edit and submit
 
   zmail search [--query Q] [--account ADDR] [--folder F] [--category person|notification|newsletter]
-               [--unread] [--since-days N] [--limit N] [--json]
+               [--label L] [--unread] [--since-days N] [--limit N] [--json]
                                          newest first, snippets only; 20 by default, 100 at most
   zmail read ID [--json]                 the whole conversation of a message, oldest first
   zmail folders [--json]                 the folders of every account, with their roles
@@ -60,6 +60,10 @@ const cliUsage = `zmail — a local mail client for agents
   zmail move --folder F [--create] ID... [--json]
                                          file messages in a folder the account has (junk: its junk folder);
                                          --create makes a missing one; trash and drafts are refused
+  zmail label add|remove --label L [--label L2] ID... [--json]
+                                         put labels on messages, or take them off; the window groups
+                                         the list by label. Labels stay on this Mac, not on the server
+  zmail label list [--json]              the labels in use and how many messages carry each
 
 Put flags before the IDs. Message IDs come from search. Mail is never sent,
 replied to or deleted. The password is never taken from the command line,
@@ -80,7 +84,7 @@ func runCLI(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "account", "sync", "providers", "skill", "issue", "llm", "search", "read", "folders", "stats", "mark-read", "archive", "move", "help", "-h", "--help":
+	case "account", "sync", "providers", "skill", "issue", "llm", "search", "read", "folders", "stats", "mark-read", "archive", "move", "label", "help", "-h", "--help":
 	default:
 		return false
 	}
@@ -130,6 +134,8 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 	switch args[0] {
 	case "sync":
 		return svc.SyncAll()
+	case "label":
+		return cliLabel(svc, args[1:], out)
 	case "search", "read", "folders", "stats", "mark-read", "archive", "move":
 		return cliMail(svc, loadPrivacy(dir), dir, args, out)
 	case "account":

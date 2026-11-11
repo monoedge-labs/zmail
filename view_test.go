@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -480,5 +481,69 @@ func TestWaveAfterWait(t *testing.T) {
 	a.open(1) // another thread starts clean
 	if len(a.waveAt) != 0 || len(a.pendAt) != 0 {
 		t.Errorf("left over: %v %v", a.waveAt, a.pendAt)
+	}
+}
+
+func TestLabelGroups(t *testing.T) {
+	rows := []store.Message{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}}
+	got := labelGroups(rows, map[int64][]string{1: {"广告", "待看"}, 2: {"广告"}, 3: {"待看"}})
+	want := []labelGroup{{"广告", []int{0, 1}}, {"待看", []int{0, 2}}, {"", []int{3}}} // equal sizes: by name
+	if !slices.EqualFunc(got, want, func(x, y labelGroup) bool { return x.Label == y.Label && slices.Equal(x.Rows, y.Rows) }) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if len(labelGroups(rows, nil)) != 1 || labelGroups(rows, nil)[0].Label != "" {
+		t.Error("no labels: one group of the unlabeled")
+	}
+}
+
+// An agent's labels group the list, once some mail has one and the button in
+// the header is on; a mail with two labels stands in both groups, and the
+// choice is kept.
+func TestListByLabel(t *testing.T) {
+	a := testApp(t)
+	a.dir = t.TempDir()
+	tt := ui.NewTester(a.view, 1360, 900)
+	if tt.HasText("未标记") {
+		t.Fatal("grouped by label with no label in the mail")
+	}
+	if err := tt.Click("按标签分组：已关闭"); err == nil {
+		t.Fatal("the switch shows with no label in the mail")
+	}
+
+	first, second := a.rows[0], a.rows[1]
+	if err := a.st.AddLabels([]int64{first.ID, second.ID}, []string{"待回复"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.AddLabels([]int64{first.ID}, []string{"重要"}); err != nil {
+		t.Fatal(err)
+	}
+	a.reload()
+	tt.Frame()
+	if err := tt.Click("按标签分组：已关闭"); err != nil {
+		t.Fatalf("the switch does not show once mail has a label: %v", err)
+	}
+	tt.Advance(300e6)
+	if !a.byLabel() {
+		t.Fatal("the click did not group by label")
+	}
+	for _, want := range []string{"待回复", "重要", "未标记"} {
+		if !tt.HasText(want) {
+			t.Errorf("no group %q: %q", want, tt.Texts())
+		}
+	}
+	if tt.HasText("通知") && !tt.HasText("未标记") {
+		t.Error("the category groups still show")
+	}
+	shot(t, tt, "12-by-label")
+	if !loadPrefs(a.dir).GroupByLabel {
+		t.Error("the choice was not kept")
+	}
+
+	if err := tt.Click("按标签分组：已开启"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300e6)
+	if a.byLabel() || tt.HasText("未标记") || !tt.HasText("人") {
+		t.Errorf("not back to the categories: %q", tt.Texts())
 	}
 }
