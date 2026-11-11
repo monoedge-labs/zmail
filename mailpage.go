@@ -35,7 +35,7 @@ const o = new ResizeObserver(f); o.observe(document.documentElement); o.observe(
 func pageHTML(markup string) string {
 	return `<!doctype html><meta charset=utf-8>` +
 		`<meta http-equiv=Content-Security-Policy content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https: http:; font-src https: http: data:">` +
-		`<style>html{background:#fff;color:#202124;color-scheme:light;font:14px/1.5 -apple-system,"PingFang SC",sans-serif}body{margin:0}img{max-width:100%;height:auto}img[src^="cid:" i]{display:none}` + chipCSS() + `</style>` +
+		`<style>html{background:#fff;color:#202124;color-scheme:light;font:14px/1.5 -apple-system,"PingFang SC",sans-serif}body{margin:0}img{max-width:100%;height:auto}img[src^="cid:" i]{display:none}` + blurCSS + `</style>` +
 		markup
 }
 

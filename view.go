@@ -468,7 +468,7 @@ func (a *app) readerPane(c *ui.Context, p pal) {
 // is off, so that its state is seen at a glance.
 func (a *app) shield(c *ui.Context, p pal, compact bool) {
 	on := a.priv.View
-	label, tip, ink, icon := "打码", "隐藏邮件里的邮箱、手机号、证件号、薪资、金额、密钥和验证码；本地模型还会隐藏姓名和地址", p.muted, icoShieldOff
+	label, tip, ink, icon := "打码", "隐藏邮件里的邮箱、手机号、证件号、薪资、金额、密钥和验证码；本地模型 AstrLink Guard 还会隐藏姓名和地址", p.muted, icoShieldOff
 	state := "打码：已关闭"
 	if on {
 		label, tip, ink, icon = "已打码", "点击显示原文", p.blue, icoShield
@@ -507,6 +507,9 @@ func (a *app) maskBanner(c *ui.Context, p pal) {
 		text = "正在识别敏感信息…"
 	case a.hidden == 0:
 		text = "已打码，这封邮件里没有发现敏感信息"
+	}
+	if a.useModel() && !a.hiding {
+		text += " · 姓名和地址由本地模型 AstrLink Guard 识别"
 	}
 	note, act := a.maskNote()
 	tint, ink := p.blue.Alpha(.1), p.blue

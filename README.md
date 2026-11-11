@@ -131,14 +131,16 @@ makes every `search` and `read` replace email addresses, mainland China mobile
 numbers, ID numbers, bank card numbers, API keys and tokens, verification codes,
 passwords, pay figures, sums of money and addresses after an address label in subjects, snippets and bodies with placeholders such as
 `‹EMAIL_1›`, and `redacted` counts them per message. The shield in the mail
-list's header does the same in the window. Both are off by default, and the
+list's header does the same in the window, showing each hidden value as blurred text
+of its own shape (the real value never reaches the window). Both are off by default, and the
 choice lives in `privacy.json` beside the database.
 
 Patterns miss what has no shape: a name, a street address. The switch "用本地模型识别姓名和地址"
 adds a local model for them,
 [AstrLink Guard](https://huggingface.co/QuantumNous/astrlink-guard) (int8, 37 MB,
 Chinese and English), read in Go by a copy of
-[magpie](https://github.com/yetone/magpie)'s reader. It downloads once, at a
+[magpie](https://github.com/yetone/magpie)'s reader. The window's banner and the
+statistics page name it. It downloads once, at a
 pinned revision and checksum, runs on the CPU of your Mac, and sends nothing
 anywhere. Reading takes about 0.1 ms a byte on an M4: a long message shows
 "正在识别敏感信息…" for a few seconds the first time. With the model turned on,

@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/monoedge-labs/zmail/internal/mailbox"
+	"github.com/monoedge-labs/zmail/internal/redact"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
@@ -258,13 +259,13 @@ func TestHidePrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Advance(300e6)
-	if tt.HasText("验证码 481516") || !tt.HasText("验证码 验证码 1") {
-		t.Fatalf("subject not hidden, or not shown as a chip: %q", tt.Texts())
+	if tt.HasText("验证码 481516") || !tt.HasText("验证码 "+redact.Fake(redact.Code, 1)) {
+		t.Fatalf("subject not hidden, or not shown as a stand-in: %q", tt.Texts())
 	}
 	if !a.priv.View || !loadPrivacy(a.dir).View {
 		t.Errorf("choice not kept: %+v %+v", a.priv, loadPrivacy(a.dir))
 	}
-	if err := tt.Click("验证码 验证码 1"); err != nil {
+	if err := tt.Click("验证码 " + redact.Fake(redact.Code, 1)); err != nil {
 		t.Fatal(err)
 	}
 	tt.Advance(300e6)
@@ -311,7 +312,7 @@ func TestAgentPrivacyKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Advance(600e6)
-	if !tt.HasText("用本地模型识别姓名和地址") || !tt.HasText("下载识别模型（约 38 MB）") {
+	if !tt.HasText("用本地模型 AstrLink Guard 识别姓名和地址") || !tt.HasText("下载 AstrLink Guard 识别模型（约 38 MB）") {
 		t.Errorf("the model's switch and download are not shown: %q", tt.Texts())
 	}
 	shot(t, tt, "14-stats-privacy")

@@ -1,6 +1,7 @@
 package redact
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -71,8 +72,8 @@ func TestHTML(t *testing.T) {
 	for _, want := range []string{
 		"width:13800138000px", // CSS is left alone
 		`bgcolor="#eee"`,      // layout survives
-		`verification code is <mark class="zm" data-k="CODE" title="验证码">验证码 1</mark>.`, // text, as a chip
-		`Write <mark class="zm" data-k="EMAIL" title="邮箱">邮箱 1</mark>`,                  // the same value, the same number
+		`verification code is <mark class="zm" data-k="CODE" title="验证码">` + Fake(Code, 1) + `</mark>.`, // text, as a stand-in
+		`Write <mark class="zm" data-k="EMAIL" title="邮箱">` + Fake(Email, 1) + `</mark>`,                // the same value, the same number
 		`href="mailto:‹EMAIL_1›"`,              // mailto links
 		`title="‹EMAIL_1›"`,                    // titles
 		`alt="‹PHONE_1›"`,                      // alt texts
@@ -84,7 +85,7 @@ func TestHTML(t *testing.T) {
 		}
 	}
 	// the texts are read as one, so a code set apart by markup is still a code
-	if !strings.Contains(got, `<p class="a">Hi <b>Lin</b>, code <i><mark class="zm" data-k="CODE" title="验证码">验证码 1</mark></i>?`) {
+	if !strings.Contains(got, `<p class="a">Hi <b>Lin</b>, code <i><mark class="zm" data-k="CODE" title="验证码">`+Fake(Code, 1)+`</mark></i>?`) {
 		t.Errorf("a code after its label across markup, and the markup itself:\n%s", got)
 	}
 }
@@ -109,7 +110,7 @@ func TestModel(t *testing.T) {
 	}
 	got := m.HTML(`<p>我是 王小明，住在<b>北京市海淀区</b>，邮箱 lin@acme.com</p>`)
 	for _, want := range []string{
-		`我是 <mark class="zm" data-k="PERSON" title="姓名">姓名 1</mark>，住在<b><mark class="zm" data-k="ADDRESS" title="地址">地址 1</mark></b>，邮箱 <mark class="zm" data-k="EMAIL" title="邮箱">邮箱 1</mark>`} {
+		`我是 <mark class="zm" data-k="PERSON" title="姓名">` + Fake(Person, 1) + `</mark>，住在<b><mark class="zm" data-k="ADDRESS" title="地址">` + Fake(Address, 1) + `</mark></b>，邮箱 <mark class="zm" data-k="EMAIL" title="邮箱">` + Fake(Email, 1) + `</mark>`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("got %s", got)
 		}
@@ -149,5 +150,40 @@ func TestPersonKeepsLatinName(t *testing.T) {
 	m.Model = func(s string) ([]Found, bool) { return []Found{{Start: 0, End: 9, Kind: Person}}, true } // "邓泽丰" only
 	if got := m.Text("邓泽丰-Zephyr，你好"); got != "‹PERSON_1›，你好" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// A stand-in is the same for the same value, takes the shape of its kind and
+// holds nothing of a value.
+func TestFake(t *testing.T) {
+	if Fake(Email, 1) != Fake(Email, 1) || Fake(Email, 1) == Fake(Email, 2) {
+		t.Error("a stand-in must follow the value's number")
+	}
+	for _, c := range []struct {
+		k  Kind
+		re string
+	}{
+		{Email, `^[a-z]+@[a-z]+\.com$`}, {Phone, `^1[3-9]\d{9}$`}, {Code, `^\d{6}$`}, {ID, `^\d{17}[\dX]$`},
+		{Salary, `^\d+,\d{3}\.\d{2}$`}, {Card, `^(\d{4} ){3}\d{4}$`},
+	} {
+		for n := 1; n < 20; n++ {
+			if !regexp.MustCompile(c.re).MatchString(Fake(c.k, n)) {
+				t.Errorf("Fake(%s, %d) = %q", c.k, n, Fake(c.k, n))
+			}
+		}
+	}
+	if Fake(Person, 1) == "" || Fake(Address, 1) == "" || Fake("OTHER", 1) == "" {
+		t.Error("empty stand-in")
+	}
+}
+
+// A page is mostly blanks between its tags; the model reads none of them.
+func TestHTMLModelSkipsBlanks(t *testing.T) {
+	var asked string
+	m := New()
+	m.Model = func(s string) ([]Found, bool) { asked = s; return nil, true }
+	m.HTML("<table>\n  <tr>\n    <td>你好</td>\n    <td>   </td>\n    <td>世界</td>\n  </tr>\n</table>")
+	if want := "你好" + sep + "世界"; asked != want {
+		t.Fatalf("model read %q, want %q", asked, want)
 	}
 }

@@ -306,7 +306,9 @@ func (m *Masker) HTML(markup string) string {
 	walk = func(n *html.Node) {
 		switch n.Type {
 		case html.TextNode:
-			if p := n.Parent; p == nil || (p.Data != "script" && p.Data != "style") {
+			// A blank text holds nothing to hide, and a page is mostly blanks
+			// between its tags: the model must not read them.
+			if p := n.Parent; strings.TrimSpace(n.Data) != "" && (p == nil || (p.Data != "script" && p.Data != "style")) {
 				texts = append(texts, &n.Data)
 				if p != nil && !rawText[p.Data] {
 					shown = append(shown, n)
@@ -363,7 +365,7 @@ func chipify(n *html.Node) {
 		}
 		mark := &html.Node{Type: html.ElementNode, Data: "mark", DataAtom: atom.Mark, Attr: []html.Attribute{
 			{Key: "class", Val: "zm"}, {Key: "data-k", Val: string(c.Kind)}, {Key: "title", Val: Label(c.Kind)}}}
-		mark.AppendChild(&html.Node{Type: html.TextNode, Data: Chip(c.Kind, c.N)})
+		mark.AppendChild(&html.Node{Type: html.TextNode, Data: Fake(c.Kind, c.N)})
 		n.Parent.InsertBefore(mark, n)
 	}
 	n.Parent.RemoveChild(n)

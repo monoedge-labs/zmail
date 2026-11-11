@@ -135,8 +135,8 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 					choice.Switch(c, &next.Agent, choice.SwitchProps{Size: theme.Small})
 				})
 				ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
-					ui.Text(c, "用本地模型识别姓名和地址").FontSize(13).TextColor(p.soft).Grow(1).
-						Tooltip("AstrLink Guard 在本机运行，邮件内容不会离开电脑。对 agent 和窗口里的邮件都生效")
+					ui.Text(c, "用本地模型 AstrLink Guard 识别姓名和地址").FontSize(13).TextColor(p.soft).Grow(1).
+						Tooltip("AstrLink Guard（QuantumNous 出品，Apache-2.0）是一个识别姓名、地址等个人信息的小模型，经 magpie 的纯 Go 读取器在本机运行，邮件内容不会离开电脑。对 agent 和窗口里的邮件都生效")
 					on := next.model()
 					choice.Switch(c, &on, choice.SwitchProps{Size: theme.Small})
 					next.ModelOff = !on
@@ -396,12 +396,12 @@ func (a *app) modelStatus(c *ui.Context, p pal) {
 		if a.dl.total > 0 {
 			pct = a.dl.done * 100 / a.dl.total
 		}
-		muted(c, p, fmt.Sprintf("正在下载识别模型… %d%%", pct))
+		muted(c, p, fmt.Sprintf("正在下载 AstrLink Guard… %d%%", pct))
 	case a.dir == "":
 	case guard.Installed(a.modelFiles()):
-		muted(c, p, "识别模型已就绪，在本机运行")
+		muted(c, p, "AstrLink Guard 已就绪，在本机运行")
 	default:
-		label := fmt.Sprintf("下载识别模型（约 %d MB）", guard.Size()>>20+1)
+		label := fmt.Sprintf("下载 AstrLink Guard 识别模型（约 %d MB）", guard.Size()>>20+1)
 		b := ui.ButtonBase(c).Padding(4, 0).AlignSelf(ui.Start).Label(label)
 		b.Children(func() { ui.Text(c, label).FontSize(13).TextColor(p.blue) })
 		if b.Clicked() {
