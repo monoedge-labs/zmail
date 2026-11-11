@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+- **HTML mail looks better.** A mail without colors of its own is drawn on a soft ground in larger type, with the app's blue for links, and follows the system's dark appearance; a mail with styles of its own keeps the white it is drawn for.
+- **Room around the text.** A mail of paragraphs that ends in a table keeps its margin instead of running to the card's edge.
+- **Tables.** A table with a border attribute shows as a single-line grid with padded cells, not double lines.
+
 ## 0.5.1
 
 - **Update check.** This release changes no behavior. It is the first one an installed 0.5.0 can update to, and confirms that the update downloads, verifies its signature and restarts into the new version.
