@@ -62,7 +62,7 @@ func main() {
 	}
 	a := newApp(st, svc)
 	if !*demo {
-		a.dir, a.priv = dir, loadPrivacy(dir)
+		a.dir, a.priv, a.sec = dir, loadPrivacy(dir), keychain{}
 	}
 	svc.Changed = a.refresh
 

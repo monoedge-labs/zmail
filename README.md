@@ -103,6 +103,7 @@ output.
 ```sh
 zmail skill                      # the full guide for an agent, as Markdown
 zmail providers --json           # providers, their credential and help page
+zmail issue --print --json       # the address of a prefilled GitHub issue; no browser
 
 zmail search --json [--query Q] [--account ADDR] [--folder F] \
     [--category person|notification|newsletter] [--unread] [--since-days N] [--limit N]
@@ -175,3 +176,34 @@ can tell it was opened. See the
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Commercial use: [COMMERCIAL.md](COMMERCIAL.md).
 Third-party software: [NOTICE.md](NOTICE.md).
+
+## Read-only mail and feedback
+
+Mail is read-only. A link clicked in a message does not open at once: Zmail
+shows the whole address, with a warning that the link may be bait (a phishing
+page, a fake login), and opens it only after you confirm. To skip the question,
+turn off "点击邮件里的链接前先确认" on the statistics page; the choice is kept
+in `privacy.json` (`no_link_guard`).
+
+To report a problem or add to one, click "反馈问题" in the sidebar, or run
+`zmail issue [--title T] [--body TEXT] [--print] [--json]`. Both open a
+prefilled GitHub issue in your browser, with the version and system, and you
+edit and submit it there. Zmail sends nothing itself and puts no mail, address
+or account in the text. `--print` only prints the address.
+
+In the window, the feedback sheet can also polish your note into a title, what
+happened and what you expected, with an LLM ([Agnes AI](https://platform.agnes-ai.com/)).
+Nothing is sent until you click "AI 润色", and only the text in that box goes,
+with email addresses, phone numbers and similar values replaced by placeholders
+first. The model is provided free by Agnes AI: `agnes-3.0-flash` is at a trial price of $0 for now, with a limit on requests per minute (see its [pricing announcement](https://wiki.agnes-ai.com/en/docs/pricing)), and the offer may change. The key in the source is Agnes's free, public one.
+
+To use your own OpenAI-compatible service, open "模型设置" in the sheet, or run
+`zmail llm set --base-url URL --model M --key-stdin` (the key comes from stdin,
+never from the command line); `zmail llm show` prints what is in use, without
+the key, and `zmail llm reset` goes back to the built-in one. The address and
+model are kept in `llm.json` beside the database and the key in the keychain.
+The address must be https (http only for a model on this computer), and
+changing it forgets the stored key, so that the key is not sent where it was
+not meant to go. `ZMAIL_LLM_BASE`, `ZMAIL_LLM_MODEL` and `ZMAIL_LLM_KEY` override
+both, for one run. If the call fails, the
+issue opens with your text as typed.

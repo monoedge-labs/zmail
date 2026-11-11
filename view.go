@@ -53,6 +53,8 @@ func (a *app) view(c *ui.Context) {
 		})
 	})
 	a.addSheet(c, p)
+	a.linkSheet(c, p)
+	a.feedbackSheet(c, p)
 }
 
 // ---- names and dates
@@ -182,6 +184,7 @@ func (a *app) sidebar(c *ui.Context, p pal) {
 				})
 				ui.Column(c).Gap(2).Padding(14, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(p.hair).Children(func() {
 					a.navItem(c, p, "page:stats", icoChart, ui.Color{}, "统计", 0, false)
+					a.feedbackItem(c, p)
 				})
 			})
 		})
@@ -622,7 +625,7 @@ func (a *app) message(c *ui.Context, p pal, m store.Message) {
 				plainBody(c, p, m.Body)
 			} else {
 				ui.Column(c).MaxWidth(680).Children(func() {
-					markdown.Markdown(c, m.Body, markdown.MarkdownProps{FontSize: 15, LineHeight: 1.7, HeaderMultiple: 0.4, MarginMultiple: 1.2, LoadImage: loadImage})
+					markdown.Markdown(c, m.Body, markdown.MarkdownProps{FontSize: 15, LineHeight: 1.7, HeaderMultiple: 0.4, MarginMultiple: 1.2, LoadImage: loadImage, OnLink: a.openLink})
 				})
 			}
 		}
@@ -633,4 +636,21 @@ func (a *app) message(c *ui.Context, p pal, m store.Message) {
 			})
 		}
 	})
+}
+
+// feedbackItem opens the project's new-issue page in the browser, where the
+// user edits the text and submits it. Nothing is sent from here.
+func (a *app) feedbackItem(c *ui.Context, p pal) {
+	b := ui.ButtonBase(c).FillWidth().MinHeight(44).Padding(0, 12).Gap(10).Radius(12).Justify(ui.Start).
+		Label("反馈问题").Tooltip("写下问题或想法，可选 AI 润色，再到 GitHub 提交 issue；内容由你确认后才提交")
+	b.Children(func() {
+		ui.Icon(c, icoFeedback).Size(18, 18).TextColor(p.nav)
+		ui.Text(c, "反馈问题").SingleLine().Grow(1).FontWeight(500).TextColor(p.nav)
+	})
+	if b.Hovered() {
+		b.Background(p.hover)
+	}
+	if b.Clicked() {
+		a.fb.open = true
+	}
 }

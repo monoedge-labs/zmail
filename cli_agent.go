@@ -64,9 +64,15 @@ placeholders such as ` + "`‹EMAIL_1›`" + `, ` + "`‹PHONE_1›`" + `, ` + "
 within a command's output, and a message's ` + "`redacted`" + ` field counts how many it holds. The user chose this.
 Report the placeholder as it is; the value is theirs to read in the window.
 
+## Report a problem
+
+When zmail fails or lacks something, run ` + "`zmail issue --print --json --title T --body TEXT`" + ` and give the user the ` + "`url`" + `.
+It is a prefilled GitHub issue that the user edits and submits. Describe the fault in the body; leave out
+mail contents, addresses and passwords. Without ` + "`--print`" + ` the command opens the user's browser.
+
 ## Secrets stay with the user
 
-Passwords, app passwords, authorization codes and OAuth client secrets belong to the user. Ask the
+Passwords, app passwords, authorization codes, OAuth client secrets and the key and address of the model service (` + "`zmail llm`" + `) belong to the user. Leave ` + "`zmail llm set`" + ` to them. Ask the
 user to type them in their own terminal; keep them out of your commands, files and replies.
 
 ## Add an account

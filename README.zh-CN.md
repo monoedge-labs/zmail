@@ -79,6 +79,7 @@ agent 通过运行命令行使用 Zmail。没有服务可连接：没有常驻�
 ```sh
 zmail skill                      # 给 agent 的完整指引（Markdown）
 zmail providers --json           # 邮箱服务商、所需凭据及帮助页
+zmail issue --print --json       # 预填好的 GitHub issue 地址，不打开浏览器
 
 zmail search --json [--query Q] [--account ADDR] [--folder F] \
     [--category person|notification|newsletter] [--unread] [--since-days N] [--limit N]
@@ -119,3 +120,13 @@ Zmail 运行在你的电脑上，不会把你的邮件发到任何地方。打�
 ## 许可证
 
 [PolyForm Noncommercial 1.0.0](LICENSE)，许可证正文以英文为准。商业用途：[COMMERCIAL.zh-CN.md](COMMERCIAL.zh-CN.md)。第三方软件：[NOTICE.md](NOTICE.md)。
+
+## 邮件只读与问题反馈
+
+邮件默认只读。在邮件里点击链接不会直接打开：Zmail 会显示完整网址，并提示该链接可能是诱骗点击（钓鱼页、伪造登录页），你确认后才会打开。想省掉这一步，在统计页关闭“点击邮件里的链接前先确认”，选择保存在 `privacy.json`（`no_link_guard`）。
+
+遇到问题或想补充时，点侧边栏的“反馈问题”，或运行 `zmail issue [--title T] [--body TEXT] [--print] [--json]`。两者都会在浏览器里打开预填好的 GitHub issue（含版本和系统信息），由你修改后自行提交。Zmail 自己不发送任何内容，文本里也不含邮件、地址或账户。`--print` 只打印地址。
+
+窗口里的反馈面板还可以用 LLM（[Agnes AI](https://platform.agnes-ai.com/)）把你的描述润色成标题、现象和期望。点“AI 润色”之前不会发送任何内容，发送的只有输入框里的文字，其中的邮箱地址、手机号等会先换成占位符。模型由 Agnes AI 免费提供：`agnes-3.0-flash` 目前试用价为 $0，有每分钟请求数限制（见其[定价公告](https://wiki.agnes-ai.com/en/docs/pricing)），活动可能调整。源码里的 key 是 Agnes 的免费公开 key。
+
+想用自己的 OpenAI 兼容服务：在面板里点“模型设置”，或运行 `zmail llm set --base-url URL --model M --key-stdin`（key 从 stdin 读入，不接受命令行参数）；`zmail llm show` 显示当前在用的配置（不含 key），`zmail llm reset` 恢复内置服务。地址和模型保存在数据库旁的 `llm.json`，key 保存在系统钥匙串。地址必须是 https（本机的模型服务可用 http）；改地址会忘记已保存的 key，避免 key 被送到原本没打算给的地方。环境变量 `ZMAIL_LLM_BASE`、`ZMAIL_LLM_MODEL`、`ZMAIL_LLM_KEY` 可单次覆盖。调用失败时，issue 页仍会带着你原样输入的文字打开。

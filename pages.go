@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/lobehub/lobe-mygo/pkg/action"
 	"github.com/lobehub/lobe-mygo/pkg/choice"
+	"github.com/lobehub/lobe-mygo/pkg/feedback"
 	"github.com/lobehub/lobe-mygo/pkg/field"
+	"github.com/lobehub/lobe-mygo/pkg/form"
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 
 	"github.com/monoedge-labs/zmail/internal/guard"
@@ -142,6 +144,13 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 					next.ModelOff = !on
 				})
 				a.modelStatus(c, p)
+				ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
+					ui.Text(c, "点击邮件里的链接前先确认").FontSize(13).TextColor(p.soft).Grow(1).
+						Tooltip("邮件默认只读。链接可能是诱骗点击（钓鱼页、伪造登录），打开前会先显示完整网址并请你确认；关闭后点击链接直接在浏览器打开")
+					guard := !next.NoLinkGuard
+					choice.Switch(c, &guard, choice.SwitchProps{Size: theme.Small})
+					next.NoLinkGuard = !guard
+				})
 				a.setPrivacy(next)
 			})
 		})
@@ -262,12 +271,12 @@ func (a *app) addSheet(c *ui.Context, p pal) {
 		s.step = 0
 		return
 	}
-	// The design's sheet: frosted glass over the window, as the window is
-	// over the desktop.
+	// A sheet over the window, on an opaque ground: what is behind a dialog
+	// must not show through it.
 	ui.DialogBase(c, &s.open, func(backdrop, panel ui.Element) {
 		backdrop.Padding(32).Background(p.scrim)
-		panel.Width(480).MaxWidthPercent(100).Radius(22).Border(1, p.sheetEdge).
-			Shadow(0, 24, 60, 0, p.sheetShadow).Material(glass.Blur{Radius: 36})
+		panel.Width(480).MaxWidthPercent(100).Radius(22).Border(1, p.hair).
+			Shadow(0, 24, 60, 0, p.sheetShadow)
 		panel.Children(func() {
 			ui.Column(c).Gap(20).Padding(24, 28, 28).Radius(22).Background(p.pop).Children(func() {
 				if s.step == 0 {
@@ -411,4 +420,278 @@ func (a *app) modelStatus(c *ui.Context, p pal) {
 			ui.Text(c, a.dl.err).FontSize(12).TextColor(p.danger)
 		}
 	}
+}
+
+// The buttons of a sheet follow the system's: at the bottom right, the
+// default one last and filled with the accent color, the others beside it
+// and to its left; one that cannot act yet is dimmed, not met with
+// an error after the click. Escape cancels, as DialogBase has it.
+
+// onAccent is the ink on the accent color.
+func onAccent(p pal) ui.Color {
+	if p.dark {
+		return ui.Hex("#0B1020")
+	}
+	return ui.RGB(255, 255, 255)
+}
+
+// styleSheetButton draws a button of a sheet, with no outline: the default
+// button is filled with the accent color, whose edge is that color, and the
+// others with a neutral fill. def makes it the default button; one that is
+// not enabled is dimmed.
+func styleSheetButton(c *ui.Context, p pal, label string, def, enabled bool) ui.Element {
+	props := action.ButtonProps{Size: theme.Large, Variant: action.Filled}
+	if def {
+		props.Variant = action.Primary
+	}
+	b := action.Button(c, label, props)
+	if def {
+		bg := p.blue
+		switch {
+		case !enabled:
+		case b.Pressed():
+			bg = bg.Mix(ui.RGB(0, 0, 0), .15)
+		case b.Hovered():
+			bg = bg.Mix(ui.RGB(255, 255, 255), .12)
+		}
+		b.Background(bg).Border(1, bg).TextColor(onAccent(p))
+	}
+	if !enabled {
+		b.Opacity(.4).AccessDisabled(true)
+	}
+	return b
+}
+
+// sheetButton draws a button of a sheet and reports its click, which a
+// button that is not enabled never gives.
+func sheetButton(c *ui.Context, p pal, label string, def, enabled bool) bool {
+	b := styleSheetButton(c, p, label, def, enabled)
+	return enabled && b.Clicked()
+}
+
+// disclosure is the arrow and name that unfold what a sheet keeps aside.
+func disclosure(c *ui.Context, p pal, label string, open bool) bool {
+	ic := icoChevron
+	if open {
+		ic = icoChevronDown
+	}
+	b := ui.ButtonBase(c).Height(32).Padding(0, 6).Gap(4).Radius(8).Label(label)
+	b.Children(func() {
+		ui.Icon(c, ic).Size(14, 14).TextColor(p.soft)
+		ui.Text(c, label).FontSize(13).FontWeight(500).TextColor(p.soft)
+	})
+	if b.Hovered() {
+		b.Background(p.hover)
+	}
+	return b.Clicked()
+}
+
+// sheetPanel frames the content of a sheet over the window.
+func sheetPanel(c *ui.Context, p pal, open *bool, width float32, gap float32, content func()) {
+	ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
+		backdrop.Padding(32).Background(p.scrim)
+		panel.Width(width).MaxWidthPercent(100).MaxHeightPercent(100).Radius(22).Border(1, p.hair).
+			Shadow(0, 24, 60, 0, p.sheetShadow)
+		panel.Children(func() {
+			ui.Column(c).Gap(gap).Padding(24, 28, 28).Radius(22).Background(p.pop).MaxHeightPercent(100).Children(content)
+		})
+	})
+}
+
+// linkSheet asks before a link clicked in mail opens: mail is read-only, and
+// a link may be bait. It is an alert, and the answer that is safe is its
+// default button, which Return gives: opening is the one that needs a click.
+// It shows the whole address with the site first, as a fake page hides in
+// the rest of a long one.
+func (a *app) linkSheet(c *ui.Context, p pal) {
+	l := &a.link
+	if !l.open {
+		return
+	}
+	host := l.url
+	if u, err := url.Parse(l.url); err == nil {
+		host = u.Hostname()
+		if u.Scheme == "mailto" {
+			host = u.Opaque
+		}
+	}
+	sheetPanel(c, p, &l.open, 440, 16, func() {
+		// Built in the dialog: a shortcut built outside it waits behind it.
+		c.OnWindowShortcut(0, ui.KeyEnter, func() { l.open = false })
+		ui.Text(c, "要打开这个链接吗？").FontSize(20).FontWeight(600).TextColor(p.ink)
+		feedback.Alert(c, "邮件里的链接可能是诱骗点击", feedback.AlertProps{
+			Type: feedback.Warning, Description: "例如钓鱼页、伪造的登录页。请确认网站无误。",
+		})
+		ui.Column(c).Gap(4).Padding(12, 14).Radius(12).Background(p.cardHi).Children(func() {
+			ui.Text(c, host).FontSize(16).FontWeight(600).TextColor(p.ink)
+			ui.Text(c, l.url).FontSize(12).TextColor(p.soft)
+		})
+		muted(c, p, "可在统计页关闭“点击邮件里的链接前先确认”。").FontSize(12)
+		ui.Row(c).AlignItems(ui.Center).Gap(12).Justify(ui.End).Children(func() {
+			if sheetButton(c, p, "仍然打开", false, true) {
+				openURL(l.url)
+				l.open = false
+			}
+			// The focus starts on the safe answer, so that Return, which
+			// presses the focused button, cannot open the link.
+			cancel := styleSheetButton(c, p, "取消", true, true).AutoFocus()
+			if cancel.Clicked() {
+				l.open = false
+			}
+		})
+	})
+	if !l.open {
+		l.url = ""
+	}
+}
+
+// feedbackSheet collects a feedback text, polishes it with the model when
+// the user asks, and opens the issue page. Nothing leaves the computer
+// before a click: "AI 润色" sends the text to the model, and the default
+// button opens the browser. Return is a new line in the text, so ⌘Return
+// is the default button's key. Its fields are Lobe's, filled, so that they
+// sit on the sheet without a frame of their own.
+func (a *app) feedbackSheet(c *ui.Context, p pal) {
+	f := &a.fb
+	if !f.open {
+		return
+	}
+	cfg := a.llmNow()
+	hasText := strings.TrimSpace(f.text) != ""
+	sheetPanel(c, p, &f.open, 560, 16, func() {
+		c.OnWindowShortcut(ui.Cmd, ui.KeyEnter, func() {
+			if hasText {
+				a.sendFeedback()
+			}
+		})
+		ui.Column(c).Gap(4).Children(func() {
+			ui.Text(c, "反馈问题").FontSize(22).FontWeight(600).TextColor(p.ink)
+			ui.Text(c, "写下遇到的问题或想法，也可以让 AI 润色成规范的 issue。").TextColor(p.soft)
+		})
+		// The body scrolls when the window is too short for it; the buttons stay.
+		ui.Scroll(c).Shrink(1).Children(func() {
+			ui.Column(c).Gap(16).Children(func() { a.feedbackBody(c, p, cfg, hasText) })
+		})
+		// What is kept aside is at the bottom left; the buttons at the right.
+		ui.Row(c).AlignItems(ui.Center).Gap(12).Padding(4, 0, 0).Children(func() {
+			if a.dir != "" {
+				if disclosure(c, p, "模型设置", f.set.open) {
+					a.toggleLLMForm()
+				}
+			}
+			ui.Box(c).Grow(1)
+			if sheetButton(c, p, "取消", false, true) {
+				f.open = false
+			}
+			if sheetButton(c, p, "打开 Issue", true, hasText) {
+				a.sendFeedback()
+			}
+		})
+	})
+}
+
+func (a *app) feedbackBody(c *ui.Context, p pal, cfg llmSettings, hasText bool) {
+	f := &a.fb
+	label := func(t string) { ui.Text(c, t).FontSize(13).FontWeight(500).TextColor(p.soft) }
+	before := f.text
+	field.TextArea(c, &f.text, field.TextAreaProps{Variant: field.InputFilled, Placeholder: "发生了什么？怎么复现？不要贴邮件内容、地址和密码", MinRows: 4, MaxRows: 8}).Label("问题描述")
+	if f.text != before {
+		f.polished = false // the fields were made from other words
+	}
+	ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
+		text := "AI 润色"
+		if f.busy {
+			text = "润色中…"
+		}
+		if sheetButton(c, p, text, false, hasText && !f.busy) {
+			a.polishFeedback()
+		}
+		if f.busy {
+			orbSpinner(c, p, connectOrb)
+		}
+		muted(c, p, "只有点“AI 润色”，上面的文字才会发给"+cfg.who()+"（已隐去邮箱、手机号等）；不点就不会发送。").FontSize(12).Grow(1).MinWidth(0)
+	})
+	// Who provides the model, and that its free offer may change.
+	if cfg.free() {
+		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+			feedback.Alert(c, "润色由 Agnes AI 免费提供", feedback.AlertProps{
+				Type: feedback.Info, Description: cfg.Model + " 目前限免，有每分钟请求数限制，以公告为准。",
+			}).Grow(1).MinWidth(0)
+			if action.Button(c, "查看公告", action.ButtonProps{Variant: action.Link}).TextColor(p.blue).Clicked() {
+				openURL(llmNotice)
+			}
+		})
+	} else {
+		feedback.Alert(c, "使用你配置的模型服务", feedback.AlertProps{
+			Type: feedback.Info, Description: cfg.host() + "，模型 " + cfg.Model,
+		})
+	}
+	if f.err != "" {
+		feedback.Alert(c, f.err, feedback.AlertProps{Type: feedback.Error, Variant: feedback.Plain})
+	}
+	if f.polished {
+		ui.Column(c).Gap(6).Children(func() {
+			label("标题")
+			field.Input(c, &f.draft.Title, field.InputProps{Variant: field.InputFilled, Size: theme.Large}).Label("标题")
+			label("现象")
+			field.TextArea(c, &f.draft.What, field.TextAreaProps{Variant: field.InputFilled, MinRows: 3, MaxRows: 6}).Label("现象")
+			label("期望")
+			field.TextArea(c, &f.draft.Expected, field.TextAreaProps{Variant: field.InputFilled, MinRows: 2, MaxRows: 4}).Label("期望")
+		})
+	}
+	if f.set.open {
+		a.llmFormView(c, p)
+	}
+}
+
+// llmFormView is the model settings, as a Lobe form: a label and a note
+// beside each field, and the address checked where it is typed. The address,
+// the model and the key are those of a service of the user's own; empty ones
+// are the built-in.
+func (a *app) llmFormView(c *ui.Context, p pal) {
+	s := &a.fb.set
+	f := s.f
+	cfg := a.llmNow()
+	keyNote := "留空使用内置免费 key"
+	if cfg.KeySource == "custom" {
+		keyNote = "已保存你的 key，留空则不变"
+	}
+	input := func(v *string, ph string, invalid bool) {
+		field.Input(c, v, field.InputProps{Variant: field.InputFilled, Placeholder: ph, Size: theme.Large, Invalid: invalid})
+	}
+	form.View(c, f, form.Props[llmValues]{Variant: form.Borderless, ItemMinWidth: 340}, func() {
+		form.Group(c, f, form.GroupProps{}, func() {
+			form.Field(c, f, form.FieldProps{Name: "base", Label: "接口地址", Desc: "OpenAI 兼容；换地址会忘记旧 key", Value: f.Values.Base,
+				Validate: func() string {
+					if v := strings.TrimSpace(f.Values.Base); v != "" {
+						if err := checkBase(strings.TrimRight(v, "/")); err != nil {
+							return err.Error()
+						}
+					}
+					return ""
+				}}, func() { input(&f.Values.Base, "留空使用内置（Agnes AI）", f.Error("base") != "") })
+			form.Field(c, f, form.FieldProps{Name: "model", Label: "模型", Value: f.Values.Model}, func() {
+				input(&f.Values.Model, defaultModel, false)
+			})
+			form.Field(c, f, form.FieldProps{Name: "key", Label: "API Key", Desc: keyNote, Value: f.Values.Key}, func() {
+				field.InputPassword(c, &f.Values.Key, field.InputProps{Variant: field.InputFilled, Placeholder: "sk-…", Size: theme.Large})
+			})
+		})
+	})
+	muted(c, p, "Key 保存在系统钥匙串。命令行：zmail llm set").FontSize(12)
+	if s.err != "" {
+		feedback.Alert(c, s.err, feedback.AlertProps{Type: feedback.Error, Variant: feedback.Plain})
+	}
+	ui.Row(c).AlignItems(ui.Center).Gap(8).Justify(ui.End).Children(func() {
+		if action.Button(c, "恢复默认", action.ButtonProps{Variant: action.Text}).Clicked() {
+			a.resetLLMForm()
+		}
+		on := f.Error("base") == ""
+		b := action.Button(c, "保存", action.ButtonProps{Variant: action.Filled})
+		if !on {
+			b.Opacity(.4).AccessDisabled(true)
+		} else if b.Clicked() {
+			a.saveLLM()
+		}
+	})
 }
