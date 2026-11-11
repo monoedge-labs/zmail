@@ -252,3 +252,45 @@ func TestConnectIsGone(t *testing.T) {
 		t.Error("zmail connect must no longer exist")
 	}
 }
+
+// search, folders and stats take flags only: a stray word must be an error,
+// not a query that quietly ignores it.
+func TestFlagsOnlyCommandsRefuseWords(t *testing.T) {
+	testDial = func(store.Account, string) mailbox.Remote { return quiet{} }
+	t.Cleanup(func() { testDial = nil })
+	dir := t.TempDir()
+	seedMail(t, dir, 0)
+	for _, c := range []struct {
+		word string
+		args []string
+	}{
+		{"accidental-positional", []string{"search", "accidental-positional", "--json"}},
+		{"accidental-positional", []string{"search", "--json", "accidental-positional"}},
+		{"extra", []string{"search", "--query", "friday", "extra", "--limit", "5"}},
+		{"accidental-positional", []string{"folders", "accidental-positional", "--json"}},
+		{"accidental-positional", []string{"folders", "--json", "accidental-positional"}},
+		{"accidental-positional", []string{"stats", "accidental-positional", "--json"}},
+		{"accidental-positional", []string{"stats", "--days", "7", "accidental-positional"}},
+	} {
+		args := c.args
+		out, err := run(t, dir, memSecrets{}, "", args...)
+		if err == nil || !strings.Contains(err.Error(), "unexpected positional argument "+`"`+c.word+`"`) ||
+			!strings.Contains(err.Error(), "usage: zmail "+args[0]) {
+			t.Errorf("%v: err = %v, want an unexpected positional argument error with usage", args, err)
+		}
+		if out != "" {
+			t.Errorf("%v printed %q", args, out)
+		}
+	}
+	// nothing ran: no operation was logged
+	s, _ := store.Open(dir + "/zmail.db")
+	defer s.Close()
+	if ops, _ := s.RecentOps(10); len(ops) != 0 {
+		t.Errorf("refused commands logged %+v", ops)
+	}
+	// IDs commands keep taking words, among flags
+	id := search(t, dir, "--query", "friday")[0].ID
+	if err := jsonRun(t, dir, nil, "read", "--json", fmt.Sprint(id)); err != nil {
+		t.Errorf("read with a flag before the ID: %v", err)
+	}
+}

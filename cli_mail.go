@@ -56,6 +56,12 @@ type statsOut struct {
 	HandledByUser   int            `json:"handled_by_user"`
 }
 
+var flagsOnly = map[string]string{
+	"search":  "[--query Q] [--account ADDR] [--folder F] [--category C] [--unread] [--since-days N] [--limit N] [--json]",
+	"folders": "[--json]",
+	"stats":   "[--days N] [--json]",
+}
+
 // parseFlags parses flags that may stand among the positional arguments,
 // and returns those.
 func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
@@ -114,6 +120,10 @@ func cliMail(svc *mailbox.Service, args []string, out io.Writer) error {
 	words, err := parseFlags(fs, args[1:])
 	if err != nil {
 		return err
+	}
+	// These take flags only: a stray word would silently widen the query.
+	if usage, ok := flagsOnly[args[0]]; ok && len(words) > 0 {
+		return fmt.Errorf("unexpected positional argument %q: usage: zmail %s %s", words[0], args[0], usage)
 	}
 	show := func(v any, text string) error {
 		if *asJSON {
