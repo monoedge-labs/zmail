@@ -1,21 +1,14 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/monoedge-labs/zmail/internal/mailbox"
-	"github.com/monoedge-labs/zmail/internal/mcpsrv"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
@@ -24,8 +17,6 @@ type app struct {
 	win *mygo.Window
 	st  *store.Store
 	svc *mailbox.Service
-	mcp *mcpsrv.Server
-	dir string // where the database and the token live
 
 	router *ui.Router
 	nav    string // the sidebar's choice
@@ -56,14 +47,6 @@ type app struct {
 	range_ int // index of ranges
 	stats  store.Stats
 
-	// Agent page.
-	token   string
-	tools   []bool
-	clients map[string]int
-	ops     []store.Op
-	mcpErr  string
-	copied  string // what was copied last, shown for a moment
-
 	add addState
 }
 
@@ -83,9 +66,9 @@ var (
 	rangeDays = []int{7, 30, 90}
 )
 
-func newApp(dir string, st *store.Store, svc *mailbox.Service, token, addr string) *app {
+func newApp(st *store.Store, svc *mailbox.Service) *app {
 	a := &app{
-		st: st, svc: svc, dir: dir, token: token,
+		st: st, svc: svc,
 		router: ui.NewRouter("/mail"), nav: "mail:inbox", sel: -1, listW: 380,
 		unread: map[string]int{},
 	}
@@ -93,28 +76,8 @@ func newApp(dir string, st *store.Store, svc *mailbox.Service, token, addr strin
 	a.list.Selected = &a.sel
 	a.list.Key = func(i int) any { return a.rows[i].ID }
 	a.list.Label = func(i int) string { return a.rows[i].Subject }
-	a.startMCP(addr)
-	for range mcpsrv.Tools {
-		a.tools = append(a.tools, true)
-	}
 	a.reload()
 	return a
-}
-
-func (a *app) startMCP(addr string) {
-	if a.mcp != nil {
-		a.mcp.Stop()
-	}
-	a.mcp = mcpsrv.New(a.svc, a.token, addr)
-	for i, on := range a.tools {
-		a.mcp.SetEnabled(mcpsrv.Tools[i].Name, on)
-	}
-	a.mcp.OnCall = func() { a.refresh() }
-	if err := a.mcp.Start(); err != nil {
-		a.mcpErr = err.Error()
-	} else {
-		a.mcpErr = ""
-	}
 }
 
 // refresh reloads the window's data from any goroutine.
@@ -193,8 +156,6 @@ func (a *app) reload() {
 	}
 
 	a.stats, _ = a.st.Stats(time.Now().AddDate(0, 0, -rangeDays[a.range_]))
-	a.clients, _ = a.st.Clients(time.Now().Add(-24 * time.Hour))
-	a.ops, _ = a.st.RecentOps(8)
 }
 
 // navigate follows the sidebar's choice.
@@ -204,8 +165,6 @@ func (a *app) navigate(id string) {
 	switch id {
 	case "page:stats":
 		page = "/stats"
-	case "page:agent":
-		page = "/agent"
 	default:
 		a.hasCur, a.thread = false, nil
 	}
@@ -311,60 +270,4 @@ func (a *app) addAccount() {
 			a.reload()
 		})
 	}()
-}
-
-func (a *app) setTool(i int, on bool) {
-	a.tools[i] = on
-	a.mcp.SetEnabled(mcpsrv.Tools[i].Name, on)
-}
-
-func (a *app) toggleServer() {
-	if a.mcp.Running() {
-		a.mcp.Stop()
-		return
-	}
-	a.startMCP(a.mcp.Addr)
-}
-
-func (a *app) resetToken() {
-	tok, err := writeToken(a.dir)
-	if err != nil {
-		a.mcpErr = err.Error()
-		return
-	}
-	a.token = tok
-	a.startMCP(a.mcp.Addr)
-}
-
-func (a *app) copy(label, text string) {
-	if err := mygo.Clipboard.Write(transfer.TextData(text)); err == nil {
-		a.copied = label
-	}
-}
-
-func (a *app) endpoint() string { return "http://" + a.mcp.Addr + "/mcp" }
-
-func (a *app) claudeCommand() string {
-	return fmt.Sprintf(`claude mcp add --transport http zmail %s --header "Authorization: Bearer %s"`, a.endpoint(), a.token)
-}
-
-// ---- files
-
-// writeToken makes a new access token for agents and keeps it in the
-// config directory, readable by the user alone.
-func writeToken(dir string) (string, error) {
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	tok := "zm_" + hex.EncodeToString(b)
-	return tok, os.WriteFile(filepath.Join(dir, "token"), []byte(tok), 0o600)
-}
-
-// loadToken reads the token, making one on first run.
-func loadToken(dir string) (string, error) {
-	if b, err := os.ReadFile(filepath.Join(dir, "token")); err == nil && strings.HasPrefix(string(b), "zm_") {
-		return strings.TrimSpace(string(b)), nil
-	}
-	return writeToken(dir)
 }

@@ -46,9 +46,6 @@ func (a *app) view(c *ui.Context) {
 			case r.Match("/stats"):
 				r.Title("统计")
 				a.statsPage(c, p)
-			case r.Match("/agent"):
-				r.Title("Agent 接入")
-				a.agentPage(c, p)
 			default:
 				r.Title("收件箱")
 				a.mailPage(c, p)
@@ -184,12 +181,9 @@ func (a *app) sidebar(c *ui.Context, p pal) {
 				})
 				ui.Column(c).Gap(2).Padding(14, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(p.hair).Children(func() {
 					a.navItem(c, p, "page:stats", icoChart, ui.Color{}, "统计", 0, false)
-					a.navItem(c, p, "page:agent", icoAgent, ui.Color{}, "Agent 接入", 0, false)
 				})
 			})
 		})
-
-		a.mcpCard(c, p)
 	})
 }
 
@@ -242,27 +236,6 @@ func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tint ui.Color
 	}
 	if b.Clicked() {
 		a.navigate(id)
-	}
-}
-
-// mcpCard says whether agents can connect, and leads to their page.
-func (a *app) mcpCard(c *ui.Context, p pal) {
-	b := ui.ButtonBase(c).Column().AlignItems(ui.Start).Gap(4).Padding(12).Radius(14).
-		Background(p.card).Border(1, p.listEdge).Label("Agent 接入")
-	b.Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			dot, label := p.green, "MCP 运行中"
-			if !a.mcp.Running() {
-				dot, label = p.muted, "MCP 已停止"
-			}
-			ui.Box(c).Size(8, 8).Radius(4).Background(dot).Shadow(0, 0, 0, 3, dot.Alpha(.18))
-			ui.Text(c, label).FontSize(13).FontWeight(600).TextColor(p.ink)
-		})
-		ui.Text(c, a.mcp.Addr).Font("Menlo").FontSize(12).TextColor(p.soft)
-		ui.Text(c, fmt.Sprintf("%d 个 agent 已连接", len(a.clients))).FontSize(12).TextColor(p.soft)
-	})
-	if b.Clicked() {
-		a.navigate("page:agent")
 	}
 }
 

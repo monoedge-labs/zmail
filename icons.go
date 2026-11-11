@@ -15,7 +15,6 @@ var (
 	icoFolder   = lucide.Folder()
 	icoMove     = lucide.FolderInput()
 	icoChart    = lucide.ChartColumn()
-	icoAgent    = lucide.Plug()
 	icoMail     = lucide.Mail()
 	icoPlus     = lucide.Plus()
 	icoChevron  = lucide.ChevronRight()

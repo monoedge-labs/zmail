@@ -1,13 +1,16 @@
 package main
 
 import (
+	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/monoedge-labs/zmail/internal/mailbox"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
@@ -19,9 +22,7 @@ func testApp(t *testing.T) *app {
 	}
 	t.Cleanup(func() { st.Close() })
 	svc := demoService(st)
-	a := newApp(t.TempDir(), st, svc, "zm_test", "127.0.0.1:0")
-	t.Cleanup(func() { a.mcp.Stop() })
-	return a
+	return newApp(st, svc)
 }
 
 // shot saves what the window shows in $ZMAIL_SHOTS, when it is set.
@@ -79,14 +80,11 @@ func TestPages(t *testing.T) {
 	}
 	shot(t, tt, "3-stats")
 
-	if err := tt.Click("Agent 接入"); err != nil {
-		t.Fatal(err)
+	for _, text := range tt.Texts() {
+		if strings.Contains(text, "Agent 接入") || strings.Contains(strings.ToLower(text), "mcp") {
+			t.Errorf("the window still shows %q", text)
+		}
 	}
-	tt.Advance(600e6)
-	if !tt.HasText("search_mail") || !tt.HasText("发送与删除不对外开放") {
-		t.Fatalf("agent page not shown: %q", tt.Texts())
-	}
-	shot(t, tt, "4-agent")
 
 	if err := tt.Click("添加账户"); err != nil {
 		t.Fatal(err)
@@ -126,11 +124,51 @@ func TestDark(t *testing.T) {
 	}
 	tt.Advance(400e6)
 	shot(t, tt, "6-dark")
-	if err := tt.Click("Agent 接入"); err != nil {
-		t.Fatal(err)
+}
+
+// A provider's sign-in form leads to that provider's own help page, and
+// only opens it when asked: the address and the password stay in the form.
+func TestProviderHelp(t *testing.T) {
+	var opened []string
+	open := openURL
+	openURL = func(u string) { opened = append(opened, u) }
+	t.Cleanup(func() { openURL = open })
+
+	for _, dark := range []bool{false, true} {
+		a := testApp(t)
+		tt := ui.NewTester(a.view, 1360, 900)
+		tt.SetDark(dark)
+		for i, pr := range mailbox.Providers {
+			opened = nil
+			if err := tt.Click("添加账户"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Advance(300e6)
+			if err := tt.Click(services[i].name); err != nil {
+				t.Fatal(err)
+			}
+			tt.Advance(300e6)
+			link := "如何获取" + pr.Secret
+			if !tt.HasText(link) || !tt.HasText(pr.HelpNote+"（"+helpHost(pr)+"）") {
+				t.Fatalf("%s: no help in the form: %q", pr.ID, tt.Texts())
+			}
+			if len(opened) != 0 {
+				t.Fatalf("%s: showing the form opened %v", pr.ID, opened)
+			}
+			a.add.email, a.add.secret = "me@example.com", "s3cret"
+			if err := tt.Click(link); err != nil {
+				t.Fatal(err)
+			}
+			if len(opened) != 1 || opened[0] != pr.Help {
+				t.Fatalf("%s: opened %v, want [%s]", pr.ID, opened, pr.Help)
+			}
+			shot(t, tt, fmt.Sprintf("signin-%s-dark%v", pr.ID, dark))
+			if err := tt.Click("关闭"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Advance(400e6)
+		}
 	}
-	tt.Advance(600e6)
-	shot(t, tt, "7-dark-agent")
 }
 
 func TestSearchAndAccounts(t *testing.T) {

@@ -67,22 +67,6 @@ func TestAccountCLI(t *testing.T) {
 	}
 }
 
-func TestConnectCLI(t *testing.T) {
-	dir := t.TempDir()
-	out, err := run(t, dir, memSecrets{}, "", "connect", "--json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var c map[string]string
-	if json.Unmarshal([]byte(out), &c) != nil || !strings.HasPrefix(c["token"], "zm_") || !strings.Contains(c["claude_code"], c["url"]) {
-		t.Errorf("connect printed %q", out)
-	}
-	again, _ := run(t, dir, memSecrets{}, "", "connect", "--json")
-	if again != out {
-		t.Error("the token must stay the same between runs")
-	}
-}
-
 func TestOAuthSecretFromStdin(t *testing.T) {
 	testDial = func(store.Account, string) mailbox.Remote { return quiet{} }
 	t.Setenv("ZMAIL_CLIENT_SECRET", "")

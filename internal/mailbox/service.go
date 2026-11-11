@@ -17,7 +17,7 @@ type Secrets interface {
 	Delete(accountID string) error
 }
 
-// Who did something: the user in the window, or an agent over MCP.
+// Who did something: the user in the window, or an agent through the CLI.
 type Who struct {
 	Actor  string // store.ActorMe or store.ActorAgent
 	Client string // "ui", or the agent's name
@@ -25,7 +25,7 @@ type Who struct {
 
 var UI = Who{Actor: store.ActorMe, Client: "ui"}
 
-// Service is everything the window and the MCP server do with mail. Every
+// Service is everything the window and the CLI do with mail. Every
 // change goes to the server first and to the local store after it.
 type Service struct {
 	Store   *store.Store

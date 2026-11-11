@@ -27,6 +27,8 @@ var testDial func(store.Account, string) mailbox.Remote
 const cliUsage = `zmail — a local mail client for agents
 
   zmail                                  open the window
+  zmail skill                            the guide an agent follows to use zmail
+  zmail providers [--json]               mail services, their credential and its official help page
   zmail account list [--json]            the accounts set up
   zmail account add --provider P --email ADDR [--json]
                                          add an account (P: google, aliyun, qq, icloud);
@@ -37,10 +39,22 @@ const cliUsage = `zmail — a local mail client for agents
                                          or is asked for without echo
   zmail account remove --email ADDR      forget an account and its password here
   zmail sync                             fetch new mail now
-  zmail connect [--json]                 where and how an agent reaches the MCP port
 
-The password is never taken from the command line, where other programs
-could read it. The mail of the server is never changed by these commands.`
+  zmail search [--query Q] [--account ADDR] [--folder F] [--category person|notification|newsletter]
+               [--unread] [--since-days N] [--limit N] [--json]
+                                         newest first, snippets only; 20 by default, 100 at most
+  zmail read ID [--json]                 the whole conversation of a message, oldest first
+  zmail folders [--json]                 the folders of every account
+  zmail stats [--days N] [--json]        mail received and sent, and who handled it; 7 days by default
+  zmail mark-read [--unread] ID... [--json]
+                                         mark messages read, or unread with --unread
+  zmail archive ID [--json]              archive the conversation of a message
+  zmail move --folder F ID... [--json]   file messages in a folder; trash, junk and drafts are refused
+
+Put flags before the IDs. Message IDs come from search. Mail is never sent,
+replied to or deleted. The password is never taken from the command line,
+where other programs could read it. These commands run in-process: zmail
+listens on no port and keeps no daemon.`
 
 func configDir() (string, error) {
 	d, err := os.UserConfigDir()
@@ -56,7 +70,7 @@ func runCLI(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "account", "sync", "connect", "help", "-h", "--help":
+	case "account", "sync", "providers", "skill", "search", "read", "folders", "stats", "mark-read", "archive", "move", "help", "-h", "--help":
 	default:
 		return false
 	}
@@ -80,8 +94,11 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 	case "help", "-h", "--help":
 		fmt.Fprintln(out, cliUsage)
 		return nil
-	case "connect":
-		return cliConnect(dir, args[1:], out)
+	case "providers":
+		return cliProviders(args[1:], out)
+	case "skill":
+		_, err := io.WriteString(out, skillText())
+		return err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -96,8 +113,14 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 		svc.Dial = testDial
 	}
 
-	if args[0] == "sync" {
+	switch args[0] {
+	case "sync":
 		return svc.SyncAll()
+	case "search", "read", "folders", "stats", "mark-read", "archive", "move":
+		return cliMail(svc, args, out)
+	case "account":
+	default:
+		return fmt.Errorf("unknown command %q\n\n%s", args[0], cliUsage)
 	}
 	if len(args) < 2 {
 		return fmt.Errorf("account needs list, add or remove\n\n%s", cliUsage)
@@ -253,32 +276,8 @@ func readSecretLine(in io.Reader) (string, error) {
 // googleLogin and openURL are variables so that tests need no browser.
 var googleLogin = mailbox.GoogleLogin
 
-func openURL(u string) {
+var openURL = func(u string) {
 	if runtime.GOOS == "darwin" {
 		exec.Command("open", u).Start()
 	}
-}
-
-// cliConnect says how an agent reaches the MCP port of the window.
-func cliConnect(dir string, args []string, out io.Writer) error {
-	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
-	addr := fs.String("addr", "127.0.0.1:8765", "where the window serves agents")
-	asJSON := fs.Bool("json", false, "print JSON")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	token, err := loadToken(dir)
-	if err != nil {
-		return err
-	}
-	url := "http://" + *addr + "/mcp"
-	cmd := fmt.Sprintf(`claude mcp add --transport http zmail %s --header "Authorization: Bearer %s"`, url, token)
-	if *asJSON {
-		return json.NewEncoder(out).Encode(map[string]string{"url": url, "token": token, "header": "Authorization: Bearer " + token, "claude_code": cmd})
-	}
-	fmt.Fprintf(out, "url    %s\ntoken  %s\n\n%s\n", url, token, cmd)
-	return nil
 }

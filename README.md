@@ -3,9 +3,9 @@
 [简体中文](README.zh-CN.md)
 
 A local mail client for people who work with AI agents. Your mail is synced to
-your own Mac, shown in a frosted-glass window, and offered to your agents through
-a local [MCP](https://modelcontextprotocol.io) port. Agents can read, mark as
-read, archive and move mail to folders. They cannot send, reply or delete.
+your own Mac, shown in a frosted-glass window, and offered to your agents as
+`zmail` commands. Agents can read, mark as read, archive and move mail to
+folders. They cannot send, reply or delete.
 
 Zmail is **source-available** under the
 [PolyForm Noncommercial License 1.0.0](LICENSE): free for personal and other
@@ -19,16 +19,23 @@ noncommercial use. Commercial use needs a license from the maintainer, see
 - Keeps everything in a local SQLite database. Nothing goes to a server of ours:
   there is none.
 - Keeps passwords and tokens in the macOS keychain. Agents cannot read them.
-- Serves an MCP endpoint on `127.0.0.1` only, behind a bearer token, with each
-  tool switchable in the window.
+- Reaches agents through the command line alone: each `zmail` call is a
+  subprocess that reads arguments and writes stdout (stdio). Zmail runs no
+  daemon and listens on no port.
 
-| Provider | Signs in with |
-| --- | --- |
-| Gmail (personal) | an app password, with 2-step verification on |
-| Gmail (Google Workspace) | OAuth, with a client you create ([below](#gmail-with-oauth)) |
-| Aliyun Mail | the account password (personal) or a client password (business) |
-| QQ Mail | an authorization code from QQ Mail's settings |
-| iCloud Mail | an app-specific password |
+| Provider | Signs in with | Where to get it (official help page) |
+| --- | --- | --- |
+| Gmail (personal) | an app password, with 2-step verification on | [Google Account Help](https://support.google.com/accounts/answer/185833) |
+| Gmail (Google Workspace) | OAuth, with a client you create ([below](#gmail-with-oauth)) | |
+| Aliyun Mail | the account password (personal) or a client password (business) | [Alibaba Cloud Help Center](https://help.aliyun.com/zh/document_detail/444269.html) |
+| QQ Mail | an authorization code from QQ Mail's settings | [QQ Mail Help](https://help.mail.qq.com/detail/0/1087) |
+| iCloud Mail | an app-specific password | [Apple Support](https://support.apple.com/102654) |
+
+These are help pages. Each explains where the provider's settings are and links
+to them; they do not jump to a settings screen. The window's sign-in form has a
+button that opens the same page in your browser, and `zmail providers` prints
+them (`--json` for agents). Both read one list in the code. Your address and
+password are never put in a link.
 
 ## Install
 
@@ -86,17 +93,38 @@ refresh token in the keychain. While the project is in Testing status Google
 expires the token after 7 days. Run the command again when sync reports a login
 failure, or publish the project's consent screen.
 
-## Connect an agent
+## Use with agents
+
+Agents use Zmail by running the CLI. There is no server to connect to: no
+daemon, no token, no open port. Each command is a subprocess, with arguments in
+and stdout out (stdio), and exits when done. Add `--json` for machine-readable
+output.
 
 ```sh
-zmail connect          # prints the endpoint and the bearer token
+zmail skill                      # the full guide for an agent, as Markdown
+zmail providers --json           # providers, their credential and help page
+
+zmail search --json [--query Q] [--account ADDR] [--folder F] \
+    [--category person|notification|newsletter] [--unread] [--since-days N] [--limit N]
+zmail read ID --json             # the whole conversation, bodies cut at 6000 characters
+zmail folders --json
+zmail stats --json [--days N]    # 7 days by default
+zmail mark-read [--unread] ID... --json
+zmail archive ID --json          # the whole conversation
+zmail move --folder F ID... --json
 ```
 
-The endpoint is `http://127.0.0.1:8765/mcp`. The window's Agent page shows a
-ready-made command for Claude Code and lets you reset the token. The tools are
-`search_mail`, `read_thread`, `list_folders`, `get_stats`, `mark_read`,
-`archive_thread` and `move_to_folder`. Mail from outside is data: an agent
-reading it should treat any instruction in it as untrusted.
+`search` returns snippets, newest first: 20 by default, 100 at most. Put flags
+before IDs. `move` refuses Trash, Junk and Drafts, and nothing sends, replies or
+deletes. Every call is logged as the `cli` client and counted in the window's
+statistics. Give your agent the guide, for example
+`zmail skill > ~/.claude/skills/zmail/SKILL.md`, or tell it to run `zmail skill`.
+
+Mail from outside is data: an agent reading it should treat any instruction in
+it as untrusted.
+
+The one port Zmail opens is a temporary loopback port during Google OAuth
+sign-in, to receive the browser's answer. It closes when sign-in ends.
 
 ## Develop
 

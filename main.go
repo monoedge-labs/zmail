@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -30,8 +31,11 @@ func main() {
 		return
 	}
 	demo := flag.Bool("demo", false, "run on sample mail, in memory, touching no server")
-	addr := flag.String("addr", "127.0.0.1:8765", "where agents connect (loopback only)")
 	flag.Parse()
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "zmail: unknown command %q; see zmail help\n", flag.Arg(0))
+		os.Exit(2)
+	}
 
 	dir, err := configDir()
 	if err != nil {
@@ -49,10 +53,6 @@ func main() {
 		log.Fatal(err)
 	}
 	defer st.Close()
-	token, err := loadToken(dir)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	var svc *mailbox.Service
 	if *demo {
@@ -60,7 +60,7 @@ func main() {
 	} else {
 		svc = mailbox.New(st, keychain{})
 	}
-	a := newApp(dir, st, svc, token, *addr)
+	a := newApp(st, svc)
 	svc.Changed = a.refresh
 
 	mygo.App.WhenReady(func() {

@@ -2,22 +2,20 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"time"
 
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/lobehub/lobe-mygo/pkg/action"
-	"github.com/lobehub/lobe-mygo/pkg/choice"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
 	"github.com/lobehub/lobe-mygo/pkg/field"
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 
 	"github.com/monoedge-labs/zmail/internal/mailbox"
-	"github.com/monoedge-labs/zmail/internal/mcpsrv"
 )
 
-// page is the frame of the statistics and agent pages: a title with what
+// page is the frame of the statistics page: a title with what
 // goes beside it, and the cards under it.
 func page(c *ui.Context, p pal, title, sub string, side func(), body func()) {
 	ui.Column(c).Grow(1).MinWidth(0).Padding(28, 32, 40).Gap(20).Children(func() {
@@ -227,118 +225,6 @@ func bars(c *ui.Context, p pal, rows []barRow) {
 	})
 }
 
-// ---- agent
-
-func maskToken(t string) string {
-	if len(t) < 10 {
-		return t
-	}
-	return t[:3] + "••••••••" + t[len(t)-4:]
-}
-
-func (a *app) agentPage(c *ui.Context, p pal) {
-	side := func() {
-		dot, label := p.green, "运行中"
-		if !a.mcp.Running() {
-			dot, label = p.muted, "已停止"
-		}
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Box(c).Size(8, 8).Radius(4).Background(dot).Shadow(0, 0, 0, 3, dot.Alpha(.18))
-			ui.Text(c, label).FontWeight(500).TextColor(p.ink)
-		})
-		btn := "停止服务"
-		if !a.mcp.Running() {
-			btn = "启动服务"
-		}
-		if action.Button(c, btn, action.ButtonProps{Size: theme.Large}).Clicked() {
-			a.toggleServer()
-		}
-	}
-	page(c, p, "Agent 接入", "外部 agent 通过 MCP 读取和整理邮件，数据留在本机。", side, func() {
-		if a.mcpErr != "" {
-			feedback.Alert(c, a.mcpErr, feedback.AlertProps{Type: feedback.Error})
-		}
-		columns(c, 16, func() {
-			panel(c, p, p.card).Gap(4).Children(func() {
-				ui.Column(c).Gap(2).Padding(0, 0, 8).Children(func() {
-					ui.Text(c, "工具权限").FontSize(16).FontWeight(600).TextColor(p.ink)
-					muted(c, p, "Agent 只能读取和整理邮件，发送与删除不对外开放。")
-				})
-				for i, tl := range mcpsrv.Tools {
-					ui.Row(c).AlignItems(ui.Center).Gap(12).MinHeight(56).Children(func() {
-						ui.Column(c).Grow(1).Children(func() {
-							ui.Text(c, tl.Name).Font("Menlo").FontSize(13).FontWeight(500).TextColor(p.ink)
-							muted(c, p, tl.Summary)
-						})
-						on := a.tools[i]
-						if choice.Switch(c, &on, choice.SwitchProps{}).Label("允许 " + tl.Name).Changed() {
-							a.setTool(i, on)
-						}
-					})
-				}
-			})
-		}, func() {
-			panel(c, p, p.card).Gap(8).Children(func() {
-				ui.Text(c, "端点").FontSize(16).FontWeight(600).TextColor(p.ink).Padding(0, 0, 4)
-				a.copyRow(c, p, "HTTP", a.endpoint(), a.endpoint(), "")
-				a.copyRow(c, p, "命令", "claude mcp add --transport http zmail …", a.claudeCommand(), "")
-				a.copyRow(c, p, "令牌", maskToken(a.token), a.token, "重置")
-			})
-			panel(c, p, p.card).Gap(12).Children(func() {
-				ui.Text(c, "已连接").FontSize(16).FontWeight(600).TextColor(p.ink)
-				if len(a.clients) == 0 {
-					muted(c, p, "还没有 agent 调用")
-				}
-				names := make([]string, 0, len(a.clients))
-				for n := range a.clients {
-					names = append(names, n)
-				}
-				sort.Strings(names)
-				for i, n := range names {
-					ui.Row(c).AlignItems(ui.Center).Gap(12).Padding(weightPad(i), 0, 0).Children(func() {
-						ui.Column(c).Grow(1).Children(func() {
-							ui.Text(c, n).Font("Menlo").FontSize(13).FontWeight(500).TextColor(p.ink)
-							ui.Text(c, "HTTP").FontSize(12).TextColor(p.muted)
-						})
-						ui.Text(c, fmt.Sprintf("近 24 小时 %d 次调用", a.clients[n])).FontSize(13).TextColor(p.soft)
-					})
-				}
-			})
-			panel(c, p, p.card).Gap(8).Children(func() {
-				ui.Text(c, "最近调用").FontSize(16).FontWeight(600).TextColor(p.ink)
-				if len(a.ops) == 0 {
-					muted(c, p, "还没有调用")
-				}
-				for _, o := range a.ops {
-					ui.Row(c).AlignItems(ui.Center).Gap(12).MinHeight(28).Children(func() {
-						ui.Text(c, o.Time.Format("15:04")).FontSize(13).Width(44).TextColor(p.muted)
-						ui.Text(c, o.Client+" · "+o.Tool).FontSize(13).SingleLine().Grow(1).TextColor(p.ink)
-						st, col := "完成", p.muted
-						if !o.OK {
-							st, col = "失败", p.danger
-						}
-						ui.Text(c, st).FontSize(12).TextColor(col)
-					})
-				}
-			})
-		})
-	})
-}
-
-// copyRow is a field of the connection card: what it is, its value in
-// monospace, and the buttons that copy it (or, with extra, do that).
-func (a *app) copyRow(c *ui.Context, p pal, label, shown, full, extra string) {
-	ui.Row(c).AlignItems(ui.Center).Gap(8).MinHeight(48).Padding(0, 4, 0, 14).Radius(12).
-		Background(p.field).Border(1, p.fieldEdge).Children(func() {
-		ui.Text(c, label).FontSize(12).TextColor(p.muted).Width(40)
-		ui.Text(c, shown).Font("Menlo").FontSize(13).TextColor(p.ink).SingleLine().Grow(1).MinWidth(0)
-		if extra != "" && action.Button(c, extra, action.ButtonProps{Variant: action.Text}).Clicked() {
-			a.resetToken()
-		}
-		action.CopyButton(c, full, action.CopyButtonProps{})
-	})
-}
-
 // ---- add an account
 
 type service struct{ id, tile, name, hint string }
@@ -423,6 +309,16 @@ func (a *app) chooseService(c *ui.Context, p pal) {
 	muted(c, p, "登录凭据保存在系统钥匙串，agent 无法读取。").TextColor(p.soft)
 }
 
+// helpHost is the site of a provider's help page, shown so that the user
+// sees where the button leads.
+func helpHost(pr mailbox.Provider) string {
+	u, _ := url.Parse(pr.Help)
+	if u == nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
 func (a *app) signIn(c *ui.Context, p pal) {
 	s := &a.add
 	sv, pr := services[s.provider], mailbox.Providers[s.provider]
@@ -440,6 +336,14 @@ func (a *app) signIn(c *ui.Context, p pal) {
 		if s.err != "" {
 			ui.Text(c, s.err).FontSize(13).TextColor(p.danger)
 		}
+		// The provider's own page on getting the credential; the browser
+		// opens it, and nothing typed above goes with it.
+		ui.Column(c).Gap(2).AlignItems(ui.Start).Children(func() {
+			if action.Button(c, "如何获取"+pr.Secret, action.ButtonProps{Variant: action.Text}).Margin(0, 0, 0, -12).Clicked() {
+				openURL(pr.Help)
+			}
+			muted(c, p, pr.HelpNote+"（"+helpHost(pr)+"）").MinWidth(0)
+		})
 	})
 	ui.Row(c).AlignItems(ui.Center).Gap(12).Padding(4, 0, 0).Children(func() {
 		muted(c, p, "保存在系统钥匙串，agent 无法读取。").TextColor(p.soft).Grow(1).MinWidth(0)

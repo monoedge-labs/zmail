@@ -8,7 +8,6 @@ Zmail includes the following software, each under its own license.
 | github.com/lobehub/lobe-mygo | MIT |
 | github.com/emersion/go-imap/v2 | MIT |
 | github.com/emersion/go-message | MIT |
-| github.com/modelcontextprotocol/go-sdk | MIT, moving to Apache-2.0 |
 | github.com/zalando/go-keyring | MIT |
 | golang.org/x/net | BSD-3-Clause |
 | golang.org/x/oauth2 | BSD-3-Clause |
