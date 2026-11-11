@@ -20,7 +20,7 @@ func TestPageHTML(t *testing.T) {
 // it away is for a mail laid out in its own table.
 func TestPagePadding(t *testing.T) {
 	got := pageHTML(`<h2>Notice</h2><p>Hi</p>`)
-	if !strings.Contains(got, "body{margin:0;padding:"+pagePad+"}") || !strings.Contains(got, "body:has(>table,") {
+	if !strings.Contains(got, "body{margin:0;padding:"+pagePad+"}") || !strings.Contains(got, ownLayout+"{padding:0}"+dataTable) {
 		t.Errorf("no room around plain text: %q", got)
 	}
 }

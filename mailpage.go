@@ -38,12 +38,22 @@ const o = new ResizeObserver(f); o.observe(document.documentElement); o.observe(
 func pageHTML(markup string) string {
 	return `<!doctype html><meta charset=utf-8>` +
 		`<meta http-equiv=Content-Security-Policy content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https: http:; font-src https: http: data:">` +
-		`<style>html{background:#fff;color:#202124;color-scheme:light;font:14px/1.5 -apple-system,"PingFang SC",sans-serif}body{margin:0;padding:` + pagePad + `}body:has(>table,>center,>div>table,>div>center,>div>div>table){padding:0}img{max-width:100%;height:auto}img[src^="cid:" i]{display:none}` + blurCSS + `</style>` +
+		`<style>html{background:#fff;color:#202124;color-scheme:light;font:14px/1.5 -apple-system,"PingFang SC",sans-serif}body{margin:0;padding:` + pagePad + `}` + ownLayout + `{padding:0}` + dataTable + `img{max-width:100%;height:auto}img[src^="cid:" i]{display:none}` + blurCSS + `</style>` +
 		markup
 }
 
 // pagePad is the room around the text of a mail that brings no layout.
 const pagePad = "20px 24px"
+
+// dataTable draws a table the sender gave a border attribute, which a browser
+// shows as double lines with the text against them, as a plain grid.
+const dataTable = `table[border]{border-collapse:collapse}table[border] :is(th,td){padding:4px 8px}`
+
+// ownLayout selects the body of a mail laid out in a table of its own, which
+// takes no room: its page is a table (or a centered one, or one in a div or
+// two) and holds no paragraph, heading or list of its own beside it. A mail of
+// paragraphs that ends in a table, as a report does, is plain text.
+const ownLayout = `body:has(>table,>center,>div>table,>div>center,>div>div>table):not(:has(>p,>h1,>h2,>h3,>h4,>ul,>ol,>pre,>blockquote))`
 
 // external reports whether a link goes to the browser or the mail app.
 func external(u string) bool {
