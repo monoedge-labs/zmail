@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- **Update check.** This release changes no behavior. It is the first one an installed 0.5.0 can update to, and confirms that the update downloads, verifies its signature and restarts into the new version.
+
 ## 0.5.0
 
 - **Updates.** Zmail checks for new versions in the background and updates itself from signed GitHub releases; "Check for Updates…" is in the app menu. An update verifies a signature made with the key in `mygo.json`.
