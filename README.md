@@ -162,7 +162,7 @@ it as untrusted.
 Hiding private values: the switch "对 agent 隐藏敏感信息" on the statistics page
 makes every `search` and `read` replace email addresses, mainland China mobile
 numbers, ID numbers, bank card numbers, API keys and tokens, verification codes,
-passwords, pay figures, sums of money and addresses after an address label in subjects, snippets and bodies with placeholders such as
+passwords, pay figures, sums of money, IP addresses (IPv4 and IPv6) and addresses after an address label in subjects, snippets and bodies with placeholders such as
 `‹EMAIL_1›`, and `redacted` counts them per message. The shield in the mail
 list's header does the same in the window, showing each hidden value as blurred text
 of its own shape (the real value never reaches the window). Both are off by default, and the

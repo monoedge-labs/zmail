@@ -9,6 +9,7 @@ package redact
 
 import (
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strings"
@@ -31,7 +32,8 @@ const (
 	Password Kind = "PASSWORD"
 	Salary   Kind = "SALARY"
 	Amount   Kind = "AMOUNT"
-	Person   Kind = "PERSON"  // found by a Model only
+	IP       Kind = "IP"
+	Person  Kind = "PERSON"  // found by a Model only
 	Address  Kind = "ADDRESS" // found by a Model only
 	Account  Kind = "ACCOUNT" // found by a Model only
 )
@@ -66,6 +68,8 @@ var rules = []rule{
 	{Salary, regexp.MustCompile(`(?i)(?:月薪|年薪|底薪|薪资|薪水|工资|基本工资|实发|应发|税前|税后|奖金|年终奖|补贴|salary|payroll|bonus)(?:[^\d]{0,16}|[^\d\s\x{a0}]{0,10}[\s\x{a0}:：]{0,64})(\d[\d,]*(?:\.\d+)?(?:\s?(?:万元|万|元|[kK]))?)`), 1, figure},
 	{ID, regexp.MustCompile(`\d{17}[\dXx]`), 0, func(s string, a, b int) bool { return alone(s, a, b) && idSum(s[a:b]) }},
 	{Email, regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`), 0, nil},
+	// IPv4 and IPv6: a candidate shape, then net/netip decides. "10:30:45" and a MAC address are not addresses.
+	{IP, regexp.MustCompile(`\d{1,3}(?:\.\d{1,3}){3}|(?:[0-9A-Fa-f]{0,4}:){2,7}(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{1,4})?`), 0, isIP},
 	{Phone, regexp.MustCompile(`(?:\+?86[ -]?)?1[3-9]\d{9}`), 0, alone},
 	{Card, regexp.MustCompile(`\d(?:[ -]?\d){12,18}`), 0, func(s string, a, b int) bool { return alone(s, a, b) && luhn(digits(s[a:b])) }},
 	// money: a sum with its currency before it or its unit after
@@ -106,6 +110,16 @@ func hasDigit(s string, a, b int) bool { return strings.ContainsAny(s[a:b], "012
 // alone reports whether s[a:b] stands apart from other digits.
 func alone(s string, a, b int) bool {
 	return (a == 0 || !isDigit(s[a-1])) && (b == len(s) || !isDigit(s[b]))
+}
+
+// isIP reports whether s[a:b] is an IP address that stands apart from the
+// letters, digits, dots and colons around it (so "std::string" and "1.2.3.4.5" stay).
+func isIP(s string, a, b int) bool {
+	if _, err := netip.ParseAddr(s[a:b]); err != nil {
+		return false
+	}
+	edge := func(c byte) bool { return isDigit(c) || c == ':' || c == '.' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+	return (a == 0 || !edge(s[a-1])) && (b == len(s) || !edge(s[b]) || s[b] == '.' && (b+1 == len(s) || !edge(s[b+1])))
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
