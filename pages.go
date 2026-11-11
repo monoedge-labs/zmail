@@ -48,7 +48,7 @@ func columns(c *ui.Context, gap float32, cols ...func()) {
 // ---- statistics
 
 var toolLabel = map[string]string{
-	"archive_thread": "归档", "move_to_folder": "移到文件夹", "mark_read": "标记已读",
+	"archive_thread": "归档", "move_to_folder": "移到文件夹", "mark_read": "标记已读", "label_mail": "打标签", "list_labels": "列出标签",
 	"search_mail": "搜索", "read_thread": "读取会话", "list_folders": "列出文件夹", "get_stats": "查看统计",
 }
 

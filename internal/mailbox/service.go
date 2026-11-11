@@ -250,6 +250,33 @@ func (s *Service) log(who Who, tool, detail string, err error) {
 	s.Store.LogOp(store.Op{Actor: who.Actor, Client: who.Client, Tool: tool, Detail: detail, OK: err == nil})
 }
 
+// Label puts labels on messages, or takes them off. Labels live in the local
+// database only: the server is not asked.
+func (s *Service) Label(who Who, ids []int64, labels []string, remove bool) (err error) {
+	verb := "add"
+	if remove {
+		verb = "remove"
+	}
+	defer func() {
+		s.log(who, "label_mail", fmt.Sprintf("%s %d labels, %d messages", verb, len(labels), len(ids)), err)
+	}()
+	for i, l := range labels {
+		if labels[i], err = store.CleanLabel(l); err != nil {
+			return err
+		}
+	}
+	if remove {
+		err = s.Store.RemoveLabels(ids, labels)
+	} else {
+		err = s.Store.AddLabels(ids, labels)
+	}
+	if err != nil {
+		return err
+	}
+	s.Changed()
+	return nil
+}
+
 // MarkRead sets or clears the read flag of messages.
 func (s *Service) MarkRead(who Who, ids []int64, seen bool) (err error) {
 	defer func() { s.log(who, "mark_read", fmt.Sprintf("%d messages, seen=%v", len(ids), seen), err) }()

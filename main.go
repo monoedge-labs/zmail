@@ -62,7 +62,7 @@ func main() {
 	}
 	a := newApp(st, svc)
 	if !*demo {
-		a.dir, a.dbPath, a.priv, a.sec = dir, dbPath, loadPrivacy(dir), keychain{}
+		a.dir, a.dbPath, a.priv, a.prefs, a.sec = dir, dbPath, loadPrivacy(dir), loadPrefs(dir), keychain{}
 	}
 	svc.Changed = a.refresh
 	useUpdater(*demo)

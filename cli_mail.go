@@ -30,17 +30,18 @@ const (
 )
 
 type mailItem struct {
-	ID       int64  `json:"id"`
-	Account  string `json:"account"`
-	Folder   string `json:"folder"`
-	From     string `json:"from"`
-	Subject  string `json:"subject"`
-	Snippet  string `json:"snippet"`
-	Date     string `json:"date"`
-	Unread   bool   `json:"unread"`
-	Category string `json:"category"`
-	Body     string `json:"body,omitempty"`
-	Redacted int    `json:"redacted,omitempty"` // values hidden in this message, when the user asked for that
+	ID       int64    `json:"id"`
+	Account  string   `json:"account"`
+	Folder   string   `json:"folder"`
+	From     string   `json:"from"`
+	Subject  string   `json:"subject"`
+	Snippet  string   `json:"snippet"`
+	Date     string   `json:"date"`
+	Unread   bool     `json:"unread"`
+	Category string   `json:"category"`
+	Labels   []string `json:"labels,omitempty"` // put on it by an agent, see label
+	Body     string   `json:"body,omitempty"`
+	Redacted int      `json:"redacted,omitempty"` // values hidden in this message, when the user asked for that
 }
 
 type senderItem struct {
@@ -61,7 +62,7 @@ type statsOut struct {
 }
 
 var flagsOnly = map[string]string{
-	"search":  "[--query Q] [--account ADDR] [--folder F] [--category C] [--unread] [--since-days N] [--limit N] [--json]",
+	"search":  "[--query Q] [--account ADDR] [--folder F] [--category C] [--label L] [--unread] [--since-days N] [--limit N] [--json]",
 	"folders": "[--json]",
 	"stats":   "[--days N] [--json]",
 }
@@ -103,14 +104,15 @@ func cliMail(svc *mailbox.Service, priv privacy, dir string, args []string, out 
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print JSON")
 	var (
-		query, account, folder, category *string
-		unread, create                   *bool
-		sinceDays, limit, days           *int
+		query, account, folder, category, label *string
+		unread, create                          *bool
+		sinceDays, limit, days                  *int
 	)
 	switch args[0] {
 	case "search":
 		query, account = fs.String("query", "", "text to find in subject, sender or body"), fs.String("account", "", "an account's address")
 		folder, category = fs.String("folder", "", "a folder name, as folders gives"), fs.String("category", "", "person, notification or newsletter")
+		label = fs.String("label", "", "only mail carrying this label")
 		unread = fs.Bool("unread", false, "unread mail only")
 		sinceDays = fs.Int("since-days", 0, "only mail from the last N days")
 		limit = fs.Int("limit", defaultLimit, "at most this many, 100 at most")
@@ -157,7 +159,7 @@ func cliMail(svc *mailbox.Service, priv privacy, dir string, args []string, out 
 
 	switch args[0] {
 	case "search":
-		q := store.Query{Text: *query, Folder: *folder, Category: *category, Unread: *unread, Limit: *limit}
+		q := store.Query{Text: *query, Folder: *folder, Category: *category, Label: strings.TrimSpace(*label), Unread: *unread, Limit: *limit}
 		if q.Limit <= 0 {
 			q.Limit = defaultLimit
 		}
@@ -187,7 +189,7 @@ func cliMail(svc *mailbox.Service, priv privacy, dir string, args []string, out 
 		if err != nil {
 			return err
 		}
-		items := mailItems(ms, byID, false, hide)
+		items := withLabels(st, ms, mailItems(ms, byID, false, hide))
 		return show(map[string]any{"messages": items}, mailLines(items, false))
 
 	case "read":
@@ -204,7 +206,7 @@ func cliMail(svc *mailbox.Service, priv privacy, dir string, args []string, out 
 		if err != nil {
 			return err
 		}
-		items := mailItems(ms, emails(), true, hide)
+		items := withLabels(st, ms, mailItems(ms, emails(), true, hide))
 		return show(map[string]any{"subject": ms[0].Subject, "messages": items}, mailLines(items, true))
 
 	case "folders":
@@ -431,6 +433,22 @@ func mailItems(ms []store.Message, accounts map[string]string, withBody bool, hi
 	return out
 }
 
+// withLabels adds the labels of ms to their items, which come in the same order.
+func withLabels(st *store.Store, ms []store.Message, items []mailItem) []mailItem {
+	ids := make([]int64, len(ms))
+	for i, m := range ms {
+		ids[i] = m.ID
+	}
+	labels, err := st.Labels(ids)
+	if err != nil {
+		return items // the labels are a help: the mail is still right without them
+	}
+	for i := range items {
+		items[i].Labels = labels[ms[i].ID]
+	}
+	return items
+}
+
 func truncate(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:n]) + "\n[cut]"
@@ -445,7 +463,11 @@ func mailLines(items []mailItem, withBody bool) string {
 		if it.Unread {
 			mark = "*"
 		}
-		fmt.Fprintf(&b, "%s %d  %s  %s  %s  %s\n", mark, it.ID, it.Date, it.Account, it.From, it.Subject)
+		fmt.Fprintf(&b, "%s %d  %s  %s  %s  %s", mark, it.ID, it.Date, it.Account, it.From, it.Subject)
+		if len(it.Labels) > 0 {
+			fmt.Fprintf(&b, "  [%s]", strings.Join(it.Labels, ", "))
+		}
+		b.WriteByte('\n')
 		if withBody {
 			fmt.Fprintf(&b, "\n%s\n\n", it.Body)
 		} else if it.Snippet != "" {

@@ -33,7 +33,7 @@ const (
 	Salary   Kind = "SALARY"
 	Amount   Kind = "AMOUNT"
 	IP       Kind = "IP"
-	Person  Kind = "PERSON"  // found by a Model only
+	Person   Kind = "PERSON"  // found by a Model only
 	Address  Kind = "ADDRESS" // found by a Model only
 	Account  Kind = "ACCOUNT" // found by a Model only
 )
@@ -118,7 +118,9 @@ func isIP(s string, a, b int) bool {
 	if _, err := netip.ParseAddr(s[a:b]); err != nil {
 		return false
 	}
-	edge := func(c byte) bool { return isDigit(c) || c == ':' || c == '.' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+	edge := func(c byte) bool {
+		return isDigit(c) || c == ':' || c == '.' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+	}
 	return (a == 0 || !edge(s[a-1])) && (b == len(s) || !edge(s[b]) || s[b] == '.' && (b+1 == len(s) || !edge(s[b+1])))
 }
 

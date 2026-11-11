@@ -324,6 +324,7 @@ func (a *app) listPane(c *ui.Context, p pal) {
 			} else {
 				muted(c, p, fmt.Sprintf("%d 封未读", unread))
 			}
+			a.labelSwitch(c, p)
 			a.shield(c, p, true)
 		})
 		before := a.query
@@ -345,6 +346,22 @@ func (a *app) listPane(c *ui.Context, p pal) {
 						text = "还没有账户，点左上角的 + 添加"
 					}
 					display.Empty(c, display.EmptyProps{Icon: icoInbox, Title: text})
+				}
+				if a.byLabel() {
+					for g, lg := range labelGroups(a.rows, a.labels) {
+						name, dot := lg.Label, p.blue
+						if name == "" {
+							name, dot = "未标记", p.soft.Alpha(.7)
+						}
+						a.group(c, p, name, dot, len(lg.Rows), func() {
+							a.rowGroup = g + 1
+							defer func() { a.rowGroup = 0 }()
+							for _, i := range lg.Rows {
+								a.personRow(c, p, i)
+							}
+						})
+					}
+					return
 				}
 				if len(people) > 0 {
 					a.group(c, p, "人", p.blue, len(people), func() {
@@ -368,6 +385,44 @@ func (a *app) listPane(c *ui.Context, p pal) {
 	})
 }
 
+// byLabel is whether the list is grouped by label now. It is only once some
+// mail has a label, so that a user of none sees the usual groups.
+func (a *app) byLabel() bool { return a.prefs.GroupByLabel && a.anyLabel }
+
+// rowKey identifies a row among the others: the mail's ID, and its group
+// when the list is grouped by label, as one mail may stand in several.
+func (a *app) rowKey(id int64) any {
+	if a.rowGroup == 0 {
+		return id
+	}
+	return [2]int64{id, int64(a.rowGroup)}
+}
+
+// labelSwitch is the button in the list's header that groups the list by
+// label. It shows once some mail has one.
+func (a *app) labelSwitch(c *ui.Context, p pal) {
+	if !a.anyLabel && !a.prefs.GroupByLabel {
+		return
+	}
+	on := a.byLabel()
+	state, tip, ink := "按标签分组：已关闭", "按标签分组", p.muted
+	if on {
+		state, tip, ink = "按标签分组：已开启", "按类别分组", p.blue
+	}
+	b := ui.ButtonBase(c).Height(30).Padding(0, 7).Radius(15).Label(state).Tooltip(tip)
+	b.Children(func() { ui.Icon(c, icoTags).Size(16, 16).TextColor(ink) })
+	switch {
+	case on:
+		b.Background(p.blue.Alpha(.14))
+	case b.Hovered():
+		b.Background(p.hover)
+	}
+	if b.Clicked() {
+		a.prefs.GroupByLabel = !a.prefs.GroupByLabel
+		a.prefs.save(a.dir)
+	}
+}
+
 func (a *app) group(c *ui.Context, p pal, name string, dot ui.Color, n int, rows func()) {
 	ui.Column(c).Gap(4).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Padding(4, 8).Children(func() {
@@ -383,7 +438,7 @@ func (a *app) personRow(c *ui.Context, p pal, i int) {
 	m := a.rows[i]
 	sel := a.hasCur && a.cur.ID == m.ID
 	b := ui.ButtonBase(c).FillWidth().Gap(12).Padding(12).Radius(14).Justify(ui.Start).AlignItems(ui.Start).
-		Label(who(m) + "：" + m.Subject).Key(m.ID)
+		Label(who(m) + "：" + m.Subject).Key(a.rowKey(m.ID))
 	if a.veiled(m.ID, false) {
 		a.near(c, b, m.ID, false, rowMargin)
 	}
