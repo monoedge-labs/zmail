@@ -144,9 +144,9 @@ func (a *app) sidebar(c *ui.Context, p pal) {
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Padding(0, 4, 0, 12).Children(func() {
 			ui.Image(c, logo).Size(28, 28).Label("Zmail")
 			ui.Text(c, "Zmail").FontSize(18).FontWeight(600).TextColor(p.ink).Grow(1)
-			add := ui.ButtonBase(c).Size(40, 40).Radius(14).Background(p.blue).
-				Shadow(0, 6, 16, 0, p.blue.Alpha(.35)).Label("添加账户").Tooltip("添加账户  ⌘N")
-			add.Children(func() { ui.Icon(c, icoPlus).Size(18, 18).TextColor(ui.RGB(255, 255, 255)) })
+			add := ui.ButtonBase(c).Size(34, 34).Radius(12).Background(p.blue).
+				Shadow(0, 5, 14, 0, p.blue.Alpha(.35)).Label("添加账户").Tooltip("添加账户  ⌘N")
+			add.Children(func() { ui.Icon(c, icoPlus).Size(16, 16).TextColor(ui.RGB(255, 255, 255)) })
 			if add.Clicked() {
 				a.add.open = true
 			}
