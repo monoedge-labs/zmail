@@ -24,7 +24,10 @@ The agent's face on the statistics page is the BotAvatar component of
 (c) 2026 Jakub Antalik), bundled with React (MIT) in `assets/botavatars.js`;
 `scripts/botavatars.sh` rebuilds it from a pinned commit. The orbs that show
 syncing and connecting are a Go port of its Thinking orbs geometry
-(`internal/orb`), checked against the library's golden vectors.
+(`internal/orb`), checked against the library's golden vectors. The light
+around a mail the local model is reading and the wave that crosses it once its
+values are hidden are ports of its Border beam (`fx_beam.go`) and Distortion
+waves (`fx_wave.go`) as shaders of MyGo.
 
 The local masking model reader in `internal/guard` is a copy of
 [magpie](https://github.com/yetone/magpie)'s `internal/pii/guard` (MIT,
