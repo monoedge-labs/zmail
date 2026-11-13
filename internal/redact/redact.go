@@ -186,6 +186,12 @@ func find(s string) []span {
 	return out
 }
 
+// HasCode reports whether s holds a verification code: the same rules that
+// hide one decide, so what a list marks as a code is what the reader hides.
+func HasCode(s string) bool {
+	return slices.ContainsFunc(find(s), func(x span) bool { return x.kind == Code })
+}
+
 // A Masker swaps hidden values for numbered placeholders such as ‹EMAIL_1›.
 // One value keeps its number across the texts a Masker sees, so a reader can
 // still tell who wrote to whom. Not safe for concurrent use.

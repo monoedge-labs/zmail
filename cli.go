@@ -28,6 +28,7 @@ const cliUsage = `zmail — a local mail client for agents
 
   zmail                                  open the window
   zmail skill                            the guide an agent follows to use zmail
+  zmail version [--json]                 the version of this zmail (also --version)
   zmail providers [--json]               mail services, their credential and its official help page
   zmail account list [--json]            the accounts set up
   zmail account add --provider P --email ADDR [--json]
@@ -84,7 +85,7 @@ func runCLI(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "account", "sync", "providers", "skill", "issue", "llm", "search", "read", "folders", "stats", "mark-read", "archive", "move", "label", "help", "-h", "--help":
+	case "account", "sync", "providers", "skill", "issue", "llm", "search", "read", "folders", "stats", "mark-read", "archive", "move", "label", "version", "--version", "help", "-h", "--help":
 	default:
 		return false
 	}
@@ -115,6 +116,8 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 		return err
 	case "issue":
 		return cliIssue(args[1:], out)
+	case "version", "--version":
+		return cliVersion(args[1:], out)
 	case "llm":
 		return cliLLM(dir, sec, args[1:], in, out)
 	}

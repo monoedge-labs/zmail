@@ -57,6 +57,17 @@ NOTARY_PROFILE=your-notarytool-profile scripts/release.sh
 
 Try the window with sample mail, touching no server: `zmail -demo`.
 
+To use `zmail` in a terminal, open **统计** (Statistics) in the app and click
+**安装** (Install) in the **命令行工具** (Command-line tool) panel. It makes
+`/usr/local/bin/zmail` a link to the executable inside `zmail.app`, and asks
+for your administrator password only when that folder is not writable. A link
+follows the app, so the command is as new as the app after each self-update. If
+another `zmail` already sits at that path, the panel shows where it points and
+offers **更新为本应用的 zmail** (replace it with this app's). `zmail version`
+prints the version. Move Zmail to the Applications folder first: from a disk
+image or a quarantined download the button stays disabled, because such a link
+would not outlast the session.
+
 ## Updates
 
 Zmail checks for a new version in the background, 10 seconds after it opens
@@ -137,6 +148,7 @@ output.
 
 ```sh
 zmail skill                      # the full guide for an agent, as Markdown
+zmail version [--json]           # the version of this zmail (also --version)
 zmail providers --json           # providers, their credential and help page
 zmail issue --print --json       # the address of a prefilled GitHub issue; no browser
 

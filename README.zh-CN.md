@@ -43,6 +43,8 @@ NOTARY_PROFILE=your-notarytool-profile scripts/release.sh
 
 不连接任何服务器、用示例邮件试用窗口：`zmail -demo`。
 
+想在终端里使用 `zmail`：打开应用的“统计”页，在“命令行工具”面板里点“安装”。它会把 `/usr/local/bin/zmail` 做成指向 `zmail.app` 内可执行文件的软链接，只有该目录不可写时才请你输入管理员密码。链接跟着应用走，所以应用每次自动更新后，命令也是同一个版本。如果该路径已有别的 `zmail`，面板会显示它指向哪里，并提供“更新为本应用的 zmail”。`zmail version` 打印版本号。请先把 Zmail 放进“应用程序”文件夹：从磁盘映像或刚下载、尚未移动的位置运行时，按钮不可用，因为那里的链接撑不过本次运行。
+
 ## 更新
 
 Zmail 会在后台检查新版本：打开 10 秒后检查一次，之后每天一次；你也可以在应用菜单里点“检查更新…”。发现新版本时，窗口会显示更新说明，你可以安装、跳过此版本或稍后提醒。更新来自本仓库的 [GitHub Releases](https://github.com/monoedge-labs/zmail/releases)。每个更新都带签名，Zmail 先用内置的公钥验证签名，再替换自己。检查只向 GitHub 询问最新的发布，不发送邮件或账户数据。`zmail -demo` 不会在后台检查。
@@ -86,6 +88,7 @@ agent 通过运行命令行使用 Zmail。没有服务可连接：没有常驻�
 
 ```sh
 zmail skill                      # 给 agent 的完整指引（Markdown）
+zmail version [--json]           # 当前 zmail 的版本号（也可用 --version）
 zmail providers --json           # 邮箱服务商、所需凭据及帮助页
 zmail issue --print --json       # 预填好的 GitHub issue 地址，不打开浏览器
 
