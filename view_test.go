@@ -232,9 +232,27 @@ func TestGoogleOAuthSheet(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Advance(300e6)
-	if !tt.HasText("请填写邮箱地址、客户端 ID 和客户端密钥") || gotEmail != "" {
+	if !tt.HasText("请填写邮箱地址和客户端密钥") || gotEmail != "" {
 		t.Fatalf("empty form started a login (%q) or hid the error: %q", gotEmail, tt.Texts())
 	}
+
+	// The client ID left empty signs in with the one zmail is built with.
+	a.add.email = "builtin@example.com"
+	a.add.clientSecret = "sec"
+	if err := tt.Click("在浏览器中登录"); err != nil {
+		t.Fatal(err)
+	}
+	if gotEmail != "builtin@example.com" || gotID != mailbox.GoogleClientID {
+		t.Fatalf("login with no client ID: email=%q id=%q", gotEmail, gotID)
+	}
+	if err := tt.Click("添加账户"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300e6)
+	if err := tt.Click("Google"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300e6)
 
 	a.add.email = "zephyr@shopline.com"
 	a.add.clientID = "cid"
@@ -245,7 +263,7 @@ func TestGoogleOAuthSheet(t *testing.T) {
 	if a.add.open || gotEmail != "zephyr@shopline.com" || gotID != "cid" || gotSecret != "sec" {
 		t.Fatalf("login open=%v email=%q id=%q secret=%q", a.add.open, gotEmail, gotID, gotSecret)
 	}
-	if len(opened) != 2 || opened[1] != "https://accounts.google.com/o/oauth2/v2/auth?test=1" {
+	if len(opened) != 3 || opened[2] != "https://accounts.google.com/o/oauth2/v2/auth?test=1" { // the help page, then the two logins
 		t.Fatalf("browser opened %v", opened)
 	}
 	var found bool

@@ -134,6 +134,11 @@ zmail account add --provider google --email you@example.com --oauth --client-id 
 # asks for the client secret without echoing it; or set $ZMAIL_CLIENT_SECRET
 ```
 
+`--client-id` may also come from `$ZMAIL_CLIENT_ID`. With neither, or with the
+window's “客户端 ID” field left empty, Zmail signs in with the client ID it is
+built with; that client's secret is not shipped, so this is for those who hold
+it.
+
 Zmail opens your browser, receives the answer on a loopback port, and keeps the
 refresh token in the keychain. While the project is in Testing status Google
 expires the token after 7 days. Sign in again when sync reports a login
