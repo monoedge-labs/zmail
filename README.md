@@ -26,7 +26,7 @@ noncommercial use. Commercial use needs a license from the maintainer, see
 | Provider | Signs in with | Where to get it (official help page) |
 | --- | --- | --- |
 | Gmail (personal) | an app password, with 2-step verification on | [Google Account Help](https://support.google.com/accounts/answer/185833) |
-| Gmail (Google Workspace) | OAuth, with a client you create ([below](#gmail-with-oauth)) | |
+| Gmail (Google Workspace) | OAuth, in the window or on the command line, with a client you create ([below](#gmail-with-oauth)) | |
 | Aliyun Mail | the account password (personal) or a client password (business) | [Alibaba Cloud Help Center](https://help.aliyun.com/zh/document_detail/444269.html) |
 | QQ Mail | an authorization code from QQ Mail's settings | [QQ Mail Help](https://help.mail.qq.com/detail/0/1087) |
 | iCloud Mail | an app-specific password | [Apple Support](https://support.apple.com/102654) |
@@ -35,7 +35,8 @@ These are help pages. Each explains where the provider's settings are and links
 to them; they do not jump to a settings screen. The window's sign-in form has a
 button that opens the same page in your browser, and `zmail providers` prints
 them (`--json` for agents). Both read one list in the code. Your address and
-password are never put in a link.
+password are never put in a link. Google's form opens on OAuth; personal Gmail
+can switch to an app password.
 
 ## Install
 
@@ -113,7 +114,9 @@ Google Workspace accounts have not accepted passwords from mail apps since
    Internal if your Workspace administrator owns the project.
 2. Create an OAuth client of type **Desktop app**. Copy its client ID and secret.
 3. Add your address as a test user.
-4. Sign in:
+4. Sign in. In the window: Add account → Google (OAuth is already selected),
+   fill in the address, client ID and secret, then press “在浏览器中登录”.
+   Personal Gmail can switch to “应用专用密码”. The command line does the same:
 
 ```sh
 zmail account add --provider google --email you@example.com --oauth --client-id <client-id>
@@ -122,7 +125,7 @@ zmail account add --provider google --email you@example.com --oauth --client-id 
 
 Zmail opens your browser, receives the answer on a loopback port, and keeps the
 refresh token in the keychain. While the project is in Testing status Google
-expires the token after 7 days. Run the command again when sync reports a login
+expires the token after 7 days. Sign in again when sync reports a login
 failure, or publish the project's consent screen.
 
 ## Use with agents

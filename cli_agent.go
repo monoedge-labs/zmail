@@ -79,9 +79,11 @@ user to type them in their own terminal; keep them out of your commands, files a
 
 1. Run ` + "`zmail providers --json`" + ` and pick the entry for the user's mail service.
 2. Show the user its ` + "`credential`" + ` name, its ` + "`help_url`" + ` and its ` + "`help_note`" + `. The page is the provider's own; the user opens it and creates the credential.
-3. Ask the user to run, in their terminal, ` + "`zmail account add --provider <id> --email <address>`" + `.
-   Zmail reads the credential from stdin, and the user pastes it there.
-   Google Workspace accounts use ` + "`--oauth --client-id <id>`" + ` and sign in through the browser.
+3. Ask the user to add the account themselves, in the window or in their terminal.
+   Window: 添加账户, then the service. Google opens on OAuth: the user fills in an email and a Desktop client ID and secret they created, then presses 在浏览器中登录. Personal Gmail can switch to 应用专用密码.
+   Terminal: ` + "`zmail account add --provider <id> --email <address>`" + `. Zmail reads the credential from stdin, and the user pastes it there.
+   Google Workspace on the terminal: ` + "`zmail account add --provider google --email <address> --oauth --client-id <id>`" + `, then the client secret.
+   Do not type a password, app password or client secret yourself.
 4. Confirm with ` + "`zmail account list --json`" + `: the account appears with its host.
 
 Providers:
