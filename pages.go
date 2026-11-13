@@ -452,7 +452,7 @@ func (a *app) signIn(c *ui.Context, p pal) {
 			if oauth {
 				ui.Column(c).Gap(6).Children(func() {
 					label("客户端 ID")
-					field.Input(c, &s.clientID, field.InputProps{Placeholder: "xxxx.apps.googleusercontent.com", Size: theme.Large, Invalid: s.err != ""}).Label("客户端 ID")
+					field.Input(c, &s.clientID, field.InputProps{Placeholder: "留空则使用 Zmail 内置的客户端", Size: theme.Large, Invalid: s.err != ""}).Label("客户端 ID")
 				})
 				ui.Column(c).Gap(6).Children(func() {
 					label("客户端密钥")

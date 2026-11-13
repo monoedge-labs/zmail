@@ -34,8 +34,9 @@ const cliUsage = `zmail — a local mail client for agents
   zmail account add --provider P --email ADDR [--json]
                                          add an account (P: google, aliyun, qq, icloud);
                                          the app password comes from stdin or $ZMAIL_PASSWORD
-  zmail account add --provider google --email ADDR --oauth --client-id ID
-                                         sign in through the browser (Google Workspace);
+  zmail account add --provider google --email ADDR --oauth [--client-id ID]
+                                         sign in through the browser (Google Workspace), with the
+                                         client zmail is built with, or yours (ID, or $ZMAIL_CLIENT_ID);
                                          the client secret comes from $ZMAIL_CLIENT_SECRET,
                                          or is asked for without echo
   zmail account remove --email ADDR      forget an account and its password here
@@ -153,7 +154,7 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 	email := fs.String("email", "", "the address")
 	asJSON := fs.Bool("json", false, "print JSON")
 	oauth := fs.Bool("oauth", false, "google: sign in through the browser (Workspace accounts)")
-	clientID := fs.String("client-id", "", "google: OAuth client ID (or $ZMAIL_CLIENT_ID)")
+	clientID := fs.String("client-id", "", "google: OAuth client ID (or $ZMAIL_CLIENT_ID); the one zmail is built with by default")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
 	}
@@ -198,10 +199,7 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 			if *provider != "google" {
 				return fmt.Errorf("--oauth is for --provider google")
 			}
-			id := cmp.Or(*clientID, os.Getenv("ZMAIL_CLIENT_ID"))
-			if id == "" {
-				return fmt.Errorf("--oauth needs the OAuth client ID: --client-id or $ZMAIL_CLIENT_ID")
-			}
+			id := cmp.Or(*clientID, os.Getenv("ZMAIL_CLIENT_ID"), mailbox.GoogleClientID)
 			cs := os.Getenv("ZMAIL_CLIENT_SECRET")
 			if cs == "" {
 				fmt.Fprint(os.Stderr, "OAuth client secret: ")

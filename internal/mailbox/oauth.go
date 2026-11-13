@@ -27,6 +27,12 @@ var googleEndpoint = oauth2.Endpoint{
 	TokenURL: "https://oauth2.googleapis.com/token",
 }
 
+// GoogleClientID is the OAuth client Zmail is built with, of the Desktop app
+// type: what --oauth signs in with when no other is given. A client ID is no
+// secret, as it shows in the address of the sign-in page. The client's secret
+// is not built in.
+const GoogleClientID = "826672560130-o7gortqf86q76er3iaknpafdrqguf6tr.apps.googleusercontent.com"
+
 type oauthSecret struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
