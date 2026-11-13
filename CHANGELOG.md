@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- **Unread mail stands out.** An unread mail has a blue dot, heavier text and its time in blue; a read one is a step lighter, and its text stays in place when it is read.
+- **Verification codes.** A mail that holds a verification code carries a "验证码" tag in the list, also while the code itself is hidden.
+- **Command line tool.** The statistics page has a "命令行工具" panel: "安装" makes `zmail` a command in the terminal, as a link at `/usr/local/bin/zmail` to the app, so it follows the app's updates. The panel shows whether it is installed and its version, and updates another `zmail` found at that path to this app's. `zmail version` prints the version.
+- **Google sign-in in the window.** Adding a Google account opens on OAuth, for Workspace accounts: the address, an OAuth client and its secret, then the browser. Personal Gmail switches to an app password.
+- **A client ID is built in.** `--client-id` is optional for `zmail account add --provider google --oauth`, and so is the window's "客户端 ID" field: left out, Zmail signs in with the client ID it is built with. `--client-id`, `$ZMAIL_CLIENT_ID` or the field names another. The client's secret is asked for as before.
+
 ## 0.5.2
 
 - **HTML mail looks better.** A mail without colors of its own is drawn on a soft ground in larger type, with the app's blue for links, and follows the system's dark appearance; a mail with styles of its own keeps the white it is drawn for.
