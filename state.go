@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -125,13 +126,18 @@ type linkAsk struct {
 }
 
 type addState struct {
-	open     bool
-	provider int
-	step     int // 0 chooses the service, 1 asks for the login
-	email    string
-	secret   string
-	busy     bool
-	err      string
+	open         bool
+	provider     int
+	step         int // 0 chooses the service, 1 asks for the login
+	email        string
+	secret       string
+	clientID     string
+	clientSecret string
+	mode         int // Google: 0 is OAuth, 1 is an app password
+	shown        int // the mode last drawn, so switching clears the error
+	busy         bool
+	err          string
+	cancel       context.CancelFunc
 }
 
 var (
@@ -667,16 +673,66 @@ func (a *app) addAccount() {
 		if err == nil {
 			err = a.svc.SyncAccount(acc)
 		}
-		a.win.Update(func() {
-			s.busy = false
-			if err != nil {
-				s.err = err.Error()
-			} else {
-				s.open, s.email, s.secret = false, "", ""
-			}
-			a.reload()
-		})
+		a.win.Update(func() { a.finishAdd(err) })
 	}()
+}
+
+// addGoogleOAuth signs a Google account in through the browser. Workspace
+// accounts take this path: the window collects the user's own Desktop client,
+// and the refresh token goes to the keychain like a password.
+func (a *app) addGoogleOAuth() {
+	s := &a.add
+	if s.busy {
+		return
+	}
+	email := strings.TrimSpace(s.email)
+	id := strings.TrimSpace(s.clientID)
+	secret := strings.TrimSpace(s.clientSecret)
+	if !strings.Contains(email, "@") || id == "" || secret == "" {
+		s.err = "请填写邮箱地址、客户端 ID 和客户端密钥"
+		return
+	}
+	s.busy, s.err = true, ""
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	s.cancel = cancel
+	work := func() error {
+		defer cancel()
+		tok, err := googleLogin(ctx, id, secret, email, openURL)
+		if err != nil {
+			return err
+		}
+		acc, err := a.svc.AddAccount("google", email, tok)
+		if err != nil {
+			return err
+		}
+		return a.svc.SyncAccount(acc)
+	}
+	if a.win == nil { // under test: no window, no other thread
+		a.finishAdd(work())
+		return
+	}
+	go func() {
+		err := work()
+		a.win.Update(func() { a.finishAdd(err) })
+	}()
+}
+
+// finishAdd ends an attempt to add an account, on the main thread.
+func (a *app) finishAdd(err error) {
+	s := &a.add
+	s.busy = false
+	s.cancel = nil
+	if err == nil {
+		s.open = false
+		s.email, s.secret, s.clientID, s.clientSecret = "", "", "", ""
+		s.err = ""
+	} else if s.open && !errors.Is(err, context.Canceled) {
+		s.err = err.Error()
+		if errors.Is(err, context.DeadlineExceeded) {
+			s.err = "登录超时，请重试"
+		}
+	}
+	a.reload()
 }
 
 // polishFeedback sends the user's text to the model, and shows the fields

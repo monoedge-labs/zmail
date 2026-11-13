@@ -258,8 +258,15 @@ func bars(c *ui.Context, p pal, rows []barRow) {
 
 type service struct{ id, tile, name, hint string }
 
+// googleOAuthHelp opens the page where the user creates a Desktop client.
+// Zmail ships no shared Google client.
+const (
+	googleOAuthHelp = "https://console.cloud.google.com/auth/clients"
+	googleOAuthNote = "Google Cloud 控制台：创建类型为 Desktop app 的 OAuth 客户端，把客户端 ID 和密钥填在上面。Workspace 账号用这条路；项目处于测试状态时，令牌 7 天后失效"
+)
+
 var services = []service{
-	{"google", "G", "Google", "Gmail、Workspace · 应用专用密码"},
+	{"google", "G", "Google", "OAuth 或应用专用密码"},
 	{"aliyun", "阿", "阿里邮箱", "企业版用客户端专用密码，个人版用登录密码"},
 	{"qq", "Q", "QQ 邮箱", "QQ、Foxmail · 授权码"},
 	{"icloud", "i", "iCloud 邮箱", "@icloud.com、@me.com · App 专用密码"},
@@ -268,17 +275,22 @@ var services = []service{
 func (a *app) addSheet(c *ui.Context, p pal) {
 	s := &a.add
 	if !s.open {
-		s.step = 0
+		// Escape closes the dialog by clearing the flag, which also stops a
+		// browser login that is still waiting.
+		if s.cancel != nil {
+			s.cancel()
+		}
+		s.step, s.mode, s.shown = 0, 0, 0
 		return
 	}
 	// A sheet over the window, on an opaque ground: what is behind a dialog
 	// must not show through it.
 	ui.DialogBase(c, &s.open, func(backdrop, panel ui.Element) {
 		backdrop.Padding(32).Background(p.scrim)
-		panel.Width(480).MaxWidthPercent(100).Radius(22).Border(1, p.hair).
+		panel.Width(480).MaxWidthPercent(100).MaxHeightPercent(100).Radius(22).Border(1, p.hair).
 			Shadow(0, 24, 60, 0, p.sheetShadow)
 		panel.Children(func() {
-			ui.Column(c).Gap(20).Padding(24, 28, 28).Radius(22).Background(p.pop).Children(func() {
+			ui.Column(c).Gap(20).Padding(24, 28, 28).Radius(22).Background(p.pop).MaxHeightPercent(100).Children(func() {
 				if s.step == 0 {
 					a.chooseService(c, p)
 				} else {
@@ -331,7 +343,7 @@ func (a *app) chooseService(c *ui.Context, p pal) {
 				b.Background(p.cardHi).Shadow(0, 4, 14, 0, p.shadowSoft)
 			}
 			if b.Clicked() {
-				s.provider, s.step, s.err = i, 1, ""
+				s.provider, s.step, s.err, s.mode = i, 1, "", 0
 			}
 		}
 	})
@@ -340,8 +352,10 @@ func (a *app) chooseService(c *ui.Context, p pal) {
 
 // helpHost is the site of a provider's help page, shown so that the user
 // sees where the button leads.
-func helpHost(pr mailbox.Provider) string {
-	u, _ := url.Parse(pr.Help)
+func helpHost(pr mailbox.Provider) string { return siteHost(pr.Help) }
+
+func siteHost(raw string) string {
+	u, _ := url.Parse(raw)
 	if u == nil {
 		return ""
 	}
@@ -351,49 +365,101 @@ func helpHost(pr mailbox.Provider) string {
 func (a *app) signIn(c *ui.Context, p pal) {
 	s := &a.add
 	sv, pr := services[s.provider], mailbox.Providers[s.provider]
-	sheetHead(c, p, "登录 "+sv.name, sv.hint, func() { s.step, s.err = 0, "" }, func() { s.open = false })
+	// Google opens on OAuth. Personal Gmail can switch to an app password.
+	which := 1
+	if pr.ID == "google" && s.mode == 0 {
+		which = 0
+	}
+	if which != s.shown {
+		s.err, s.shown = "", which
+	}
+	oauth := pr.ID == "google" && which == 0
+	sub := sv.hint
+	if pr.ID == "google" {
+		sub = "Workspace 用 OAuth。个人 Gmail 用应用专用密码。"
+	}
+	sheetHead(c, p, "登录 "+sv.name, sub, func() { s.step, s.err = 0, "" }, func() { s.open = false })
 	label := func(t string) { ui.Text(c, t).FontSize(13).FontWeight(500).TextColor(p.soft) }
-	ui.Column(c).Gap(14).Children(func() {
-		ui.Column(c).Gap(6).Children(func() {
-			label("邮箱地址")
-			field.Input(c, &s.email, field.InputProps{Placeholder: "name@example.com", Size: theme.Large}).Label("邮箱地址").AutoFocus()
-		})
-		ui.Column(c).Gap(6).Children(func() {
-			label(pr.Secret)
-			field.InputPassword(c, &s.secret, field.InputProps{Placeholder: pr.Secret, Size: theme.Large, Invalid: s.err != ""}).Label(pr.Secret)
-		})
-		if s.err != "" {
-			ui.Text(c, s.err).FontSize(13).TextColor(p.danger)
-		}
-		// The provider's own page on getting the credential; the browser
-		// opens it, and nothing typed above goes with it.
-		ui.Column(c).Gap(2).AlignItems(ui.Start).Children(func() {
-			if action.Button(c, "如何获取"+pr.Secret, action.ButtonProps{Variant: action.Text}).Margin(0, 0, 0, -12).Clicked() {
-				openURL(pr.Help)
+	ui.Scroll(c).Shrink(1).MinWidth(0).Children(func() {
+		ui.Column(c).Gap(14).Children(func() {
+			if pr.ID == "google" {
+				sel := &s.mode
+				if s.busy {
+					frozen := s.mode
+					sel = &frozen
+				}
+				action.Segmented(c, sel, []string{"OAuth", "应用专用密码"}, action.SegmentedProps{Size: theme.Large, Block: true})
 			}
-			muted(c, p, pr.HelpNote+"（"+helpHost(pr)+"）").MinWidth(0)
+			ui.Column(c).Gap(6).Children(func() {
+				label("邮箱地址")
+				field.Input(c, &s.email, field.InputProps{Placeholder: "name@example.com", Size: theme.Large}).Label("邮箱地址").AutoFocus()
+			})
+			if oauth {
+				ui.Column(c).Gap(6).Children(func() {
+					label("客户端 ID")
+					field.Input(c, &s.clientID, field.InputProps{Placeholder: "xxxx.apps.googleusercontent.com", Size: theme.Large, Invalid: s.err != ""}).Label("客户端 ID")
+				})
+				ui.Column(c).Gap(6).Children(func() {
+					label("客户端密钥")
+					field.InputPassword(c, &s.clientSecret, field.InputProps{Placeholder: "客户端密钥", Size: theme.Large, Invalid: s.err != ""}).Label("客户端密钥")
+				})
+			} else {
+				ui.Column(c).Gap(6).Children(func() {
+					label(pr.Secret)
+					field.InputPassword(c, &s.secret, field.InputProps{Placeholder: pr.Secret, Size: theme.Large, Invalid: s.err != ""}).Label(pr.Secret)
+				})
+			}
+			if s.err != "" {
+				ui.Text(c, s.err).FontSize(13).TextColor(p.danger)
+			}
+			if oauth && s.busy {
+				muted(c, p, "已打开浏览器，在 Google 页面同意后回到这里。")
+			}
+			// The provider's own page; nothing typed above goes with the link.
+			helpLabel, helpURL, helpNote := "如何获取"+pr.Secret, pr.Help, pr.HelpNote+"（"+helpHost(pr)+"）"
+			if oauth {
+				helpLabel, helpURL, helpNote = "如何创建 OAuth 客户端", googleOAuthHelp, googleOAuthNote+"（"+siteHost(googleOAuthHelp)+"）"
+			}
+			ui.Column(c).Gap(2).AlignItems(ui.Start).Children(func() {
+				if action.Button(c, helpLabel, action.ButtonProps{Variant: action.Text}).Margin(0, 0, 0, -12).Clicked() {
+					openURL(helpURL)
+				}
+				muted(c, p, helpNote).MinWidth(0)
+			})
 		})
 	})
-	ui.Row(c).AlignItems(ui.Center).Gap(12).Padding(4, 0, 0).Children(func() {
-		muted(c, p, "保存在系统钥匙串，agent 无法读取。").TextColor(p.soft).Grow(1).MinWidth(0)
-		if s.busy {
-			orbSpinner(c, p, connectOrb)
+	text := "连接"
+	if oauth {
+		text = "在浏览器中登录"
+	}
+	if s.busy {
+		text = "连接中…"
+		if oauth {
+			text = "等待授权…"
 		}
-		if action.Button(c, "取消", action.ButtonProps{Size: theme.Large, Variant: action.Text}).Clicked() {
-			s.open = false
-		}
-		text := "连接"
-		if s.busy {
-			text = "连接中…"
-		}
-		on := ui.RGB(255, 255, 255)
-		if p.dark {
-			on = ui.Hex("#0B1020")
-		}
-		if action.Button(c, text, action.ButtonProps{Size: theme.Large, Variant: action.Primary}).
-			Background(p.blue).TextColor(on).Shadow(0, 6, 16, 0, p.blue.Alpha(.3)).Clicked() {
-			a.addAccount()
-		}
+	}
+	on := ui.RGB(255, 255, 255)
+	if p.dark {
+		on = ui.Hex("#0B1020")
+	}
+	ui.Column(c).Gap(12).Children(func() {
+		muted(c, p, "保存在系统钥匙串，agent 无法读取。")
+		ui.Row(c).AlignItems(ui.Center).Gap(12).Justify(ui.End).Children(func() {
+			if s.busy {
+				orbSpinner(c, p, connectOrb)
+			}
+			if action.Button(c, "取消", action.ButtonProps{Size: theme.Large, Variant: action.Text}).Clicked() {
+				s.open = false
+			}
+			if action.Button(c, text, action.ButtonProps{Size: theme.Large, Variant: action.Primary}).
+				Background(p.blue).TextColor(on).Shadow(0, 6, 16, 0, p.blue.Alpha(.3)).Clicked() {
+				if oauth {
+					a.addGoogleOAuth()
+				} else {
+					a.addAccount()
+				}
+			}
+		})
 	})
 }
 
