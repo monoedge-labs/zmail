@@ -54,6 +54,33 @@ func TestText(t *testing.T) {
 	}
 }
 
+// HasCode is true for the texts whose code the masker hides, and for no other kind of value.
+func TestHasCode(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want bool
+	}{
+		{"你的验证码是 482913", true},
+		{"验证码：5821，请勿泄露", true},
+		{"【某某】校验码 123456，5 分钟内有效", true},
+		{"Your verification code is 482913", true},
+		{"Your one-time password: 90412", true},
+		{"OTP 3321 for login", true},
+		{"482913 is your verification code", true},
+		{"BXZ5-P7QU is your Libraries.dev sign-in code", true},
+		{"This is your verification code", false}, // the word without a code
+		{"请输入验证码完成登录", false},
+		{"订单 482913 已发货", false},                               // digits with no code word
+		{"联系 13800138000 或 lin@acme.com，密码: hunter22!", false}, // other private values are no code
+		{"月薪 25000，合计 ¥1,280.50", false},
+		{"", false},
+	} {
+		if got := HasCode(c.in); got != c.want {
+			t.Errorf("HasCode(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
 func TestOverlapAndCount(t *testing.T) {
 	m := New()
 	// An 18-digit ID also looks like a card number; the ID keeps it.

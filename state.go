@@ -61,6 +61,7 @@ type app struct {
 	query       string
 	cat         int // 0 all, then catNames
 	rows        []store.Message
+	codes       map[int64]bool     // mails of the lists that hold a verification code, found once, in the text as the store has it (a hidden copy has none left)
 	labels      map[int64][]string // the labels of rows, which an agent put on them
 	anyLabel    bool               // some mail has a label: the list can be grouped by it
 	rowGroup    int                // the group whose rows are being drawn, 0 for the category groups: a mail in two groups needs two keys
@@ -91,6 +92,8 @@ type app struct {
 	add  addState
 	link linkAsk
 	fb   feedbackState
+
+	cliTool cliPanel // the statistics page's panel for the command line tool
 
 	sec   mailbox.Secrets // the keychain; nil keeps no secret
 	llm   llmSettings     // the model service in use, read once: the keychain is slow
@@ -150,7 +153,7 @@ func newApp(st *store.Store, svc *mailbox.Service) *app {
 	a := &app{
 		st: st, svc: svc,
 		router: ui.NewRouter("/mail"), nav: "mail:inbox", sel: -1, listW: 380,
-		unread: map[string]int{}, pages: map[pageKey]*mailPage{},
+		unread: map[string]int{}, pages: map[pageKey]*mailPage{}, codes: map[int64]bool{},
 		veils: map[veilKey]veil{}, want: map[veilKey]bool{}, asked: map[veilKey]bool{},
 		pendAt: map[int64]time.Time{}, waveAt: map[int64]time.Time{},
 	}
@@ -251,6 +254,9 @@ func (a *app) reload() {
 	ids := make([]int64, len(a.rows))
 	for i, m := range a.rows {
 		ids[i] = m.ID
+		if _, ok := a.codes[m.ID]; !ok { // before show swaps the text for its hidden copy
+			a.codes[m.ID] = redact.HasCode(m.Subject) || redact.HasCode(m.Snippet)
+		}
 	}
 	a.labels, _ = a.st.Labels(ids)
 	counts, _ := a.st.LabelCounts()
@@ -574,6 +580,7 @@ func (a *app) navigate(id string) {
 	switch id {
 	case "page:stats":
 		page = "/stats"
+		a.cliTool.read = false // the panel there reads the link again
 	default:
 		a.hasCur, a.thread = false, nil
 	}

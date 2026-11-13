@@ -96,6 +96,7 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 				}
 				bars(c, p, rows)
 			})
+			a.cliPanel(c, p)
 		}, func() {
 			panel(c, p, p.card).Children(func() {
 				ui.Text(c, "来信最多").FontSize(16).FontWeight(600).TextColor(p.ink)
@@ -154,6 +155,60 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 				a.setPrivacy(next)
 			})
 		})
+	})
+}
+
+// cliPanel is the panel of the command line tool: whether `zmail` is on the
+// terminal's path as a link to this app, and the button that makes it so.
+func (a *app) cliPanel(c *ui.Context, p pal) {
+	s := &a.cliTool
+	if !s.read {
+		a.checkCLI()
+	}
+	panel(c, p, p.card).Children(func() {
+		ui.Text(c, "命令行工具").FontSize(16).FontWeight(600).TextColor(p.ink)
+		// The button for what can be done about the link; dimmed while that is
+		// under way, or when this is no place to install from.
+		button := func(label string, alone bool) {
+			if s.busy {
+				label = "安装中…"
+			}
+			enabled := !s.busy && s.why == ""
+			b := styleSheetButton(c, p, label, true, enabled)
+			if alone { // under text in a column, it keeps its own width
+				b.AlignSelf(ui.Start)
+			}
+			if enabled && b.Clicked() {
+				a.installCLI()
+			}
+		}
+		switch s.st.State {
+		case cliCurrent:
+			ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Box(c).Size(8, 8).Radius(4).Background(p.green)
+				ui.Text(c, "已安装").FontSize(13).FontWeight(600).TextColor(p.ink)
+				ui.Text(c, cliLink).FontSize(13).TextColor(p.soft).SingleLine().Grow(1).MinWidth(0)
+			})
+			muted(c, p, "版本 "+appVersion()+" · 随应用更新自动保持最新")
+		case cliOther:
+			ui.Column(c).Gap(2).Children(func() {
+				ui.Text(c, cliLink+" 已存在").FontSize(13).FontWeight(600).TextColor(p.ink)
+				ui.Text(c, s.st.What).FontSize(13).TextColor(p.soft)
+				muted(c, p, "更新后它指向本应用里的 zmail，并随应用更新。")
+			})
+			button("更新为本应用的 zmail", true)
+		default:
+			ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
+				ui.Text(c, "安装后可在终端使用 zmail").FontSize(13).TextColor(p.soft).Grow(1).MinWidth(0)
+				button("安装", false)
+			})
+		}
+		if s.why != "" && s.st.State != cliCurrent {
+			ui.Text(c, s.why).FontSize(12).TextColor(p.orange)
+		}
+		if s.err != "" {
+			ui.Text(c, s.err).FontSize(12).TextColor(p.danger)
+		}
 	})
 }
 
