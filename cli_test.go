@@ -88,4 +88,20 @@ func TestOAuthSecretFromStdin(t *testing.T) {
 	if gotID != "cid" || gotSecret != "s3cret" {
 		t.Errorf("login got id %q secret %q", gotID, gotSecret)
 	}
+
+	// With no client named, the one zmail is built with signs in; $ZMAIL_CLIENT_ID comes before it.
+	t.Setenv("ZMAIL_CLIENT_ID", "")
+	if _, err := run(t, dir, sec, "s3cret\n", "account", "add", "--provider", "google", "--email", "two@example.com", "--oauth"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(mailbox.GoogleClientID, ".apps.googleusercontent.com") || gotID != mailbox.GoogleClientID {
+		t.Errorf("login got id %q, want the built-in %q", gotID, mailbox.GoogleClientID)
+	}
+	t.Setenv("ZMAIL_CLIENT_ID", "envid")
+	if _, err := run(t, dir, sec, "s3cret\n", "account", "add", "--provider", "google", "--email", "three@example.com", "--oauth"); err != nil {
+		t.Fatal(err)
+	}
+	if gotID != "envid" {
+		t.Errorf("login got id %q, want $ZMAIL_CLIENT_ID", gotID)
+	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -693,10 +694,10 @@ func (a *app) addGoogleOAuth() {
 		return
 	}
 	email := strings.TrimSpace(s.email)
-	id := strings.TrimSpace(s.clientID)
+	id := cmp.Or(strings.TrimSpace(s.clientID), mailbox.GoogleClientID) // left empty: the client zmail is built with
 	secret := strings.TrimSpace(s.clientSecret)
-	if !strings.Contains(email, "@") || id == "" || secret == "" {
-		s.err = "请填写邮箱地址、客户端 ID 和客户端密钥"
+	if !strings.Contains(email, "@") || secret == "" {
+		s.err = "请填写邮箱地址和客户端密钥"
 		return
 	}
 	s.busy, s.err = true, ""
