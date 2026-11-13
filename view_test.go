@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image/png"
 	"os"
@@ -151,6 +152,16 @@ func TestProviderHelp(t *testing.T) {
 				t.Fatal(err)
 			}
 			tt.Advance(300e6)
+			if pr.ID == "google" {
+				if !tt.HasText("在浏览器中登录") || !tt.HasText("如何创建 OAuth 客户端") {
+					t.Fatalf("google: OAuth form missing: %q", tt.Texts())
+				}
+				shot(t, tt, fmt.Sprintf("signin-google-oauth-dark%v", dark))
+				if err := tt.Click("应用专用密码"); err != nil {
+					t.Fatal(err)
+				}
+				tt.Advance(300e6)
+			}
 			link := "如何获取" + pr.Secret
 			if !tt.HasText(link) || !tt.HasText(pr.HelpNote+"（"+helpHost(pr)+"）") {
 				t.Fatalf("%s: no help in the form: %q", pr.ID, tt.Texts())
@@ -171,6 +182,83 @@ func TestProviderHelp(t *testing.T) {
 			}
 			tt.Advance(400e6)
 		}
+	}
+}
+
+// Google's sheet signs a Workspace account in through the browser. The help
+// page opens only when asked, and an empty form does not start a login.
+func TestGoogleOAuthSheet(t *testing.T) {
+	var opened []string
+	open := openURL
+	openURL = func(u string) { opened = append(opened, u) }
+	login := googleLogin
+	var gotID, gotSecret, gotEmail string
+	googleLogin = func(_ context.Context, id, secret, email string, open func(string)) (string, error) {
+		gotID, gotSecret, gotEmail = id, secret, email
+		open("https://accounts.google.com/o/oauth2/v2/auth?test=1")
+		return `{"client_id":"cid","client_secret":"sec","refresh_token":"rt"}`, nil
+	}
+	t.Cleanup(func() { openURL, googleLogin = open, login })
+
+	a := testApp(t)
+	tt := ui.NewTester(a.view, 1360, 900)
+	if err := tt.Click("添加账户"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300e6)
+	if err := tt.Click("Google"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300e6)
+	for _, want := range []string{"在浏览器中登录", "客户端 ID", "客户端密钥", "Workspace 用 OAuth。个人 Gmail 用应用专用密码。"} {
+		if !tt.HasText(want) {
+			t.Fatalf("oauth form lacks %q: %q", want, tt.Texts())
+		}
+	}
+	if tt.HasText("如何获取应用专用密码") {
+		t.Fatal("oauth form shows the app-password help")
+	}
+	if len(opened) != 0 {
+		t.Fatalf("showing the form opened %v", opened)
+	}
+	if err := tt.Click("如何创建 OAuth 客户端"); err != nil {
+		t.Fatal(err)
+	}
+	if len(opened) != 1 || opened[0] != googleOAuthHelp {
+		t.Fatalf("help opened %v", opened)
+	}
+	if err := tt.Click("在浏览器中登录"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300e6)
+	if !tt.HasText("请填写邮箱地址、客户端 ID 和客户端密钥") || gotEmail != "" {
+		t.Fatalf("empty form started a login (%q) or hid the error: %q", gotEmail, tt.Texts())
+	}
+
+	a.add.email = "workspace@example.com"
+	a.add.clientID = "cid"
+	a.add.clientSecret = "sec"
+	if err := tt.Click("在浏览器中登录"); err != nil {
+		t.Fatal(err)
+	}
+	if a.add.open || gotEmail != "workspace@example.com" || gotID != "cid" || gotSecret != "sec" {
+		t.Fatalf("login open=%v email=%q id=%q secret=%q", a.add.open, gotEmail, gotID, gotSecret)
+	}
+	if len(opened) != 2 || opened[1] != "https://accounts.google.com/o/oauth2/v2/auth?test=1" {
+		t.Fatalf("browser opened %v", opened)
+	}
+	var found bool
+	for _, acc := range a.accounts {
+		if acc.Email == "workspace@example.com" && acc.Provider == "google" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("account not added: %+v", a.accounts)
+	}
+	sec, err := a.svc.Secrets.Get("google:workspace@example.com")
+	if err != nil || !strings.Contains(sec, `"refresh_token":"rt"`) {
+		t.Fatalf("secret = %q, %v", sec, err)
 	}
 }
 
