@@ -63,11 +63,13 @@ func demoService(st *store.Store) *mailbox.Service {
 	seeds := []seed{
 		{0, "林晓", "lin@acme.com", "设计评审改到周四 15:00", "周四下午三点可以吗？会议室已订好，[议程在这里](https://example.com/agenda)。\n\n另外请把 **Q3 的指标表**带上。", store.CatPerson, 25 * time.Minute, false, ""},
 		{0, "GitHub", "noreply@github.com", "[zmail] CI 通过：main", "All checks passed.", store.CatNotification, 2 * h, false, ""},
+		{1, "Google", "no-reply@accounts.google.com", "Google 验证码：482913", "你的 Google 验证码是 482913，10 分钟内有效。如果不是你本人操作，请忽略这封邮件。", store.CatNotification, 3 * h, false, ""},
 		{1, "Stripe", "receipts@stripe.com", "你的 11 月收据", "已收到付款 \\$20.00。", store.CatNotification, 5 * h, true, store.ActorAgent},
 		{2, "王磊", "wanglei@qq.com", "周末爬山？", "周六早上八点，老地方集合。", store.CatPerson, 8 * h, false, ""},
 		{0, "Go Weekly", "news@golangweekly.com", "Go Weekly #581", "本周：Go 1.27 的新特性。", store.CatNewsletter, 20 * h, true, store.ActorAgent},
 		{1, "阿里云", "service@aliyun.com", "账单提醒", "本月消费 ¥128.40。", store.CatNotification, 26 * h, true, store.ActorAgent},
 		{0, "Anna", "anna@design.io", "Re: 图标稿", "改好了，看看这版。", store.CatPerson, 30 * h, true, store.ActorMe},
+		{2, "Notion", "notify@mail.notion.so", "Your login code: 736128", "Use this one-time code to sign in. It expires in 10 minutes.", store.CatNotification, 28 * h, true, store.ActorMe},
 		{2, "腾讯云", "noreply@tencent.com", "域名即将到期", "example.dev 将在 30 天后到期。", store.CatNotification, 50 * h, true, store.ActorAgent},
 		{0, "Linear", "notifications@linear.app", "3 条新评论", "有人评论了 ZM-12。", store.CatNotification, 52 * h, true, store.ActorAgent},
 		{1, "知乎周刊", "weekly@zhihu.com", "本周热门", "精选 10 条。", store.CatNewsletter, 75 * h, true, store.ActorMe},

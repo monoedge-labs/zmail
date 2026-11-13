@@ -25,6 +25,7 @@ func testApp(t *testing.T) *app {
 	}
 	t.Cleanup(func() { st.Close() })
 	svc := demoService(st)
+	useCLIDir(t)
 	return newApp(st, svc)
 }
 
@@ -534,6 +535,10 @@ func TestListByLabel(t *testing.T) {
 	if tt.HasText("通知") && !tt.HasText("未标记") {
 		t.Error("the category groups still show")
 	}
+	// the rows of a group are those of a person: dots and tags there too
+	if !tt.HasText("未读") || count(tt, "验证码") != 2 {
+		t.Errorf("no marks on the rows of a label group: %q", tt.Texts())
+	}
 	shot(t, tt, "12-by-label")
 	if !loadPrefs(a.dir).GroupByLabel {
 		t.Error("the choice was not kept")
@@ -546,4 +551,89 @@ func TestListByLabel(t *testing.T) {
 	if a.byLabel() || tt.HasText("未标记") || !tt.HasText("人") {
 		t.Errorf("not back to the categories: %q", tt.Texts())
 	}
+}
+
+// count is how many elements of the last frame show exactly s.
+func count(tt *ui.Tester, s string) int {
+	n := 0
+	for _, text := range tt.Texts() {
+		if text == s {
+			n++
+		}
+	}
+	return n
+}
+
+// An unread mail has a dot at the left of its row, a read one has the same room
+// empty, so that the text keeps its place when a mail is read; a mail with a
+// verification code carries a tag that names the kind and shows no code.
+func TestUnreadMarks(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		a := testApp(t)
+		tt := ui.NewTester(a.view, 1360, 900)
+		tt.SetDark(dark)
+		tt.Advance(300e6)
+		unread, codes := 0, 0
+		for _, m := range a.rows {
+			if !m.Seen {
+				unread++
+			}
+			if a.codes[m.ID] {
+				codes++
+			}
+		}
+		// the demo has four unread mails, and two with a code: one unread, one read
+		if unread != 4 || codes != 2 {
+			t.Fatalf("the sample mail has %d unread and %d with a code", unread, codes)
+		}
+		if got := count(tt, "未读"); got != unread {
+			t.Errorf("%d dots for %d unread mails: %q", got, unread, tt.Texts())
+		}
+		if got := count(tt, "验证码"); got != codes {
+			t.Errorf("%d tags for %d mails with a code: %q", got, codes, tt.Texts())
+		}
+		shot(t, tt, fmt.Sprintf("20-unread-dark%v", dark))
+
+		// the text of an unread row and of a read one start at the same place,
+		// in a row of a person and in a compact one
+		left := func(s string) float32 {
+			r, ok := tt.Find(s)
+			if !ok {
+				t.Fatalf("no %q in %q", s, tt.Texts())
+			}
+			return r.X
+		}
+		if left("设计评审改到周四 15:00") != left("Re: 图标稿") || left("[zmail] CI 通过：main") != left("你的 11 月收据") {
+			t.Errorf("unread and read rows do not line up")
+		}
+		before := left("设计评审改到周四 15:00")
+
+		// reading a mail takes its dot, and moves nothing
+		if err := tt.Click("设计评审改到周四 15:00"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Advance(300e6)
+		if got := count(tt, "未读"); got != unread-1 || left("设计评审改到周四 15:00") != before {
+			t.Errorf("after reading: %d dots, text at %v, was %v", got, left("设计评审改到周四 15:00"), before)
+		}
+	}
+}
+
+// The tag is found in the mail's own text: with the values hidden the list
+// shows no code, and still says there is one.
+func TestCodeTagWhenHidden(t *testing.T) {
+	a := testApp(t)
+	a.priv = privacy{View: true, ModelOff: true}
+	a.reload()
+	tt := ui.NewTester(a.view, 1360, 900)
+	tt.Advance(300e6)
+	if got := count(tt, "验证码"); got != 2 {
+		t.Errorf("%d tags with the values hidden, want 2: %q", got, tt.Texts())
+	}
+	for _, text := range tt.Texts() {
+		if strings.Contains(text, "482913") || strings.Contains(text, "736128") {
+			t.Errorf("a code shows with the values hidden: %q", text)
+		}
+	}
+	shot(t, tt, "21-code-hidden")
 }

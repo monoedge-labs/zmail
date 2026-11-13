@@ -52,6 +52,24 @@ func panel(c *ui.Context, p pal, bg ui.Color) ui.Element {
 	return ui.Column(c).Gap(12).Padding(20).Radius(16).Background(bg).Shadow(0, 6, 20, 0, p.shadowSoft)
 }
 
+// unreadDot is the mark at the left of a row: the accent color while the mail
+// is unread, and the same room left empty when it is read, so that the row's
+// text does not move when that changes. top sets it level with the row's first line.
+func unreadDot(c *ui.Context, p pal, unread bool, top float32) {
+	d := ui.Box(c).Size(8, 8).Shrink(0).Radius(4).Margin(top, -4, 0, 0) // the gap after it is 8, not the row's 12
+	if unread {
+		d.Background(p.blue).Label("未读")
+	}
+}
+
+// codeTag marks a row whose mail holds a verification code. It names the kind
+// and shows nothing of the code, which stays hidden where the window hides it.
+func codeTag(c *ui.Context, p pal) {
+	ui.Row(c).AlignItems(ui.Center).Shrink(0).Padding(1, 6).Radius(6).Background(p.orange.Alpha(.14)).Children(func() {
+		ui.Text(c, "验证码").FontSize(11).FontWeight(600).TextColor(p.orange).NoWrap()
+	})
+}
+
 // avatar is a person's initial in a circle, on the blue when chosen.
 func avatar(c *ui.Context, p pal, name string, size float32, on bool) {
 	bg, fg := p.avatar, p.nav

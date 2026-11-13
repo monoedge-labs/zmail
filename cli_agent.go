@@ -102,6 +102,7 @@ Providers:
 | label mail | ` + "`zmail label add --label L [--label L2] ID... --json`" + `, and ` + "`zmail label remove`" + ` the same way |
 | list the labels in use | ` + "`zmail label list --json`" + ` |
 | fetch new mail | ` + "`zmail sync`" + ` |
+| check the version | ` + "`zmail version --json`" + ` |
 
 - Put flags before IDs. IDs come from ` + "`search`" + ` (the ` + "`id`" + ` field).
 - ` + "`search`" + ` returns snippets, newest first: 20 by default, 100 at most. ` + "`read`" + ` returns the full conversation with bodies cut at 6000 characters.

@@ -437,17 +437,19 @@ func (a *app) group(c *ui.Context, p pal, name string, dot ui.Color, n int, rows
 func (a *app) personRow(c *ui.Context, p pal, i int) {
 	m := a.rows[i]
 	sel := a.hasCur && a.cur.ID == m.ID
-	b := ui.ButtonBase(c).FillWidth().Gap(12).Padding(12).Radius(14).Justify(ui.Start).AlignItems(ui.Start).
+	ink := rowInk(p, m.Seen)
+	b := ui.ButtonBase(c).FillWidth().Gap(12).Padding(12, 12, 12, 8).Radius(14).Justify(ui.Start).AlignItems(ui.Start).
 		Label(who(m) + "：" + m.Subject).Key(a.rowKey(m.ID))
 	if a.veiled(m.ID, false) {
 		a.near(c, b, m.ID, false, rowMargin)
 	}
 	b.Children(func() {
+		unreadDot(c, p, !m.Seen, 14) // level with the middle of the avatar
 		avatar(c, p, who(m), 36, sel)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 			ui.Row(c).AlignItems(ui.Baseline).Gap(8).Children(func() {
-				ui.Text(c, who(m)).SingleLine().Grow(1).FontWeight(weight(!m.Seen, 600, 500)).TextColor(p.ink)
-				muted(c, p, when(m.Date)).FontSize(12)
+				ui.Text(c, who(m)).SingleLine().Grow(1).FontWeight(weight(!m.Seen, 700, 500)).TextColor(ink)
+				a.rowTail(c, p, m)
 			})
 			if a.veiled(m.ID, false) {
 				live := a.asked[veilKey{m.ID, false, a.v}]
@@ -455,7 +457,7 @@ func (a *app) personRow(c *ui.Context, p pal, i int) {
 				bone(c, 13, 88, live)
 				return
 			}
-			maskedText(c, p, m.Subject, 0, weight(!m.Seen, 500, 400), p.ink).SingleLine()
+			maskedText(c, p, m.Subject, 0, weight(!m.Seen, 600, 400), ink).SingleLine()
 			maskedText(c, p, m.Snippet, 13, 400, p.muted).SingleLine()
 		})
 	})
@@ -467,6 +469,30 @@ func (a *app) personRow(c *ui.Context, p pal, i int) {
 	}
 	if b.Clicked() {
 		a.open(i)
+	}
+}
+
+// rowInk is the ink of a row's sender and subject: the strongest while the
+// mail is unread, a step lighter once it is read.
+func rowInk(p pal, seen bool) ui.Color {
+	if seen {
+		return p.soft
+	}
+	return p.ink
+}
+
+// rowTail is the end of a row's first line: the tag of a mail with a
+// verification code, which says that and nothing of the code, and the time,
+// in the accent color while the mail is unread.
+func (a *app) rowTail(c *ui.Context, p pal, m store.Message) {
+	if a.codes[m.ID] {
+		codeTag(c, p)
+	}
+	t := ui.Text(c, when(m.Date)).FontSize(12)
+	if m.Seen {
+		t.TextColor(p.muted)
+	} else {
+		t.TextColor(p.blue).FontWeight(600)
 	}
 }
 
@@ -522,17 +548,18 @@ func weight(strong bool, hi, lo int) int {
 func (a *app) compactRow(c *ui.Context, p pal, i int) {
 	m := a.rows[i]
 	sel := a.hasCur && a.cur.ID == m.ID
-	b := ui.ButtonBase(c).FillWidth().MinHeight(44).Gap(12).Padding(0, 12).Radius(12).Justify(ui.Start).Label(m.Subject).Key(m.ID)
+	b := ui.ButtonBase(c).FillWidth().MinHeight(44).Gap(12).Padding(0, 12, 0, 8).Radius(12).Justify(ui.Start).Label(m.Subject).Key(m.ID)
 	if a.veiled(m.ID, false) {
 		a.near(c, b, m.ID, false, rowMargin)
 	}
 	b.Children(func() {
+		unreadDot(c, p, !m.Seen, 0)
 		if a.veiled(m.ID, false) {
 			bone(c, 14, 55, a.asked[veilKey{m.ID, false, a.v}]).Grow(1).MinWidth(0)
 		} else {
-			maskedText(c, p, m.Subject, 0, weight(!m.Seen, 500, 400), p.ink).SingleLine().Grow(1).MinWidth(0)
+			maskedText(c, p, m.Subject, 0, weight(!m.Seen, 600, 400), rowInk(p, m.Seen)).SingleLine().Grow(1).MinWidth(0)
 		}
-		muted(c, p, when(m.Date)).FontSize(12)
+		a.rowTail(c, p, m)
 	})
 	switch {
 	case sel:
