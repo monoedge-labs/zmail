@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- **Intel Macs.** Zmail is built for Intel as well as Apple silicon, for macOS 13 or later. An Intel Mac installs `zmail-0.6.1-amd64.dmg` and updates itself from its own update file; Apple silicon apps update as before.
+
 ## 0.6.0
 
 - **Unread mail stands out.** An unread mail has a blue dot, heavier text and its time in blue; a read one is a step lighter, and its text stays in place when it is read.
