@@ -40,12 +40,12 @@ can switch to an app password.
 
 ## Install
 
-Requires macOS on Apple silicon and Go 1.27.3 or newer.
+Requires macOS 13 or later, on Apple silicon or Intel, and Go 1.27.3 or newer.
 
 ```sh
 git clone https://github.com/monoedge-labs/zmail
 cd zmail
-scripts/release.sh          # builds build/darwin-arm64/zmail.app, ad hoc signed
+scripts/release.sh          # builds build/darwin-{arm64,amd64}/zmail.app, ad hoc signed
 ```
 
 To sign and notarize with your own Developer ID:

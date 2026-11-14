@@ -26,12 +26,12 @@ Zmail 以 [PolyForm Noncommercial License 1.0.0](LICENSE) **公开源代码**：
 
 ## 安装
 
-需要 Apple 芯片的 macOS，以及 Go 1.27.3 或更新版本。
+需要 macOS 13 或更新版本（Apple 芯片或 Intel），以及 Go 1.27.3 或更新版本。
 
 ```sh
 git clone https://github.com/monoedge-labs/zmail
 cd zmail
-scripts/release.sh          # 构建 build/darwin-arm64/zmail.app，使用临时签名
+scripts/release.sh          # 构建 build/darwin-{arm64,amd64}/zmail.app，使用临时签名
 ```
 
 用你自己的 Developer ID 签名并公证：

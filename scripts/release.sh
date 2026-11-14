@@ -39,12 +39,12 @@ for arg in "$@"; do
 done
 
 if [ -z "$MACOS_SIGNING_IDENTITY" ]; then
-  exec go tool mygo build -platform darwin/arm64 -skip-notarize "$@"
+  exec go tool mygo build -platform darwin/arm64,darwin/amd64 -skip-notarize "$@"
 fi
 if [ -z "$NOTARY_PROFILE" ]; then
-  exec go tool mygo build -platform darwin/arm64 -sign "$MACOS_SIGNING_IDENTITY" -skip-notarize "$@"
+  exec go tool mygo build -platform darwin/arm64,darwin/amd64 -sign "$MACOS_SIGNING_IDENTITY" -skip-notarize "$@"
 fi
 # mygo reads the notarization profile from mygo.json: add it for this run only.
 tmp=$(mktemp); cp mygo.json "$tmp"; trap 'cp "$tmp" mygo.json; rm -f "$tmp"' EXIT
 sed "s|\"out\": \"build\"|\"out\": \"build\", \"macos\": {\"notarize\": {\"keychainProfile\": \"$NOTARY_PROFILE\"}}|" "$tmp" > mygo.json
-go tool mygo build -platform darwin/arm64 -sign "$MACOS_SIGNING_IDENTITY" "$@"
+go tool mygo build -platform darwin/arm64,darwin/amd64 -sign "$MACOS_SIGNING_IDENTITY" "$@"
