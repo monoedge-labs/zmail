@@ -34,6 +34,10 @@ type Service struct {
 	Dial func(a store.Account, secret string) Remote
 	// Changed is called after anything changed, from any goroutine.
 	Changed func()
+	// Arrived, when set, is called with the messages a sync added to the
+	// inbox and did not know, from the sync's goroutine. A folder's first
+	// sync adds none: what it brings was all there before.
+	Arrived func([]store.Message)
 
 	mu      sync.Mutex
 	remotes map[string]Remote
@@ -174,15 +178,28 @@ func (s *Service) syncFolder(a store.Account, r Remote, f Folder) error {
 	if err != nil {
 		return err
 	}
+	notify := s.Arrived != nil && last > 0 && f.Role == store.RoleInbox
+	var arrived []store.Message
 	for _, h := range hs {
+		snippet := Snippet(PlainText(h.Body), 140)
 		if err := s.Store.UpsertMessage(store.Message{
 			AccountID: a.ID, Folder: f.Name, Role: f.Role, UID: h.UID,
 			ThreadKey: ThreadKey(h.Subject), FromName: h.FromName, FromAddr: h.FromAddr,
-			Subject: h.Subject, Snippet: Snippet(PlainText(h.Body), 140), Body: h.Body, HTML: h.HTML, Date: h.Date, Seen: h.Seen,
+			Subject: h.Subject, Snippet: snippet, Body: h.Body, HTML: h.HTML, Date: h.Date, Seen: h.Seen,
 			Category: Categorize(h.FromAddr, h.ListUnsub),
 		}); err != nil {
 			return err
 		}
+		if notify && !h.Seen {
+			arrived = append(arrived, store.Message{
+				ID: s.Store.MessageID(a.ID, f.Name, h.UID), AccountID: a.ID, Folder: f.Name,
+				UID: h.UID, ThreadKey: ThreadKey(h.Subject), FromName: h.FromName, FromAddr: h.FromAddr,
+				Subject: h.Subject, Snippet: snippet, Date: h.Date,
+			})
+		}
+	}
+	if len(arrived) > 0 {
+		s.Arrived(arrived)
 	}
 	if last > 0 {
 		if seen, err := r.Flags(f.Name, flagSync); err == nil {

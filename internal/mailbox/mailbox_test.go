@@ -408,3 +408,33 @@ func TestInlineImages(t *testing.T) {
 		t.Errorf("replaceCID = %s", got)
 	}
 }
+
+// A sync tells new unseen inbox mail apart from the mail it already knew:
+// a folder's first sync raises none, a seen one and a non-inbox one none.
+func TestSyncArrived(t *testing.T) {
+	svc, fake, acc := setup(t)
+	var got []store.Message
+	svc.Arrived = func(ms []store.Message) { got = append(got, ms...) }
+	fake.folders["INBOX"] = append(fake.folders["INBOX"],
+		Header{UID: 4, Subject: "Fresh", FromName: "Lin", FromAddr: "lin@x.com", Date: time.Now(), Body: "hi"},
+		Header{UID: 5, Subject: "Read already", FromName: "Lin", FromAddr: "lin@x.com", Date: time.Now(), Body: "hi", Seen: true},
+	)
+	fake.folders["Archive"] = append(fake.folders["Archive"],
+		Header{UID: 1, Subject: "Old", FromAddr: "a@b.c", Date: time.Now(), Body: "hi"})
+	if err := svc.SyncAccount(acc); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Subject != "Fresh" {
+		t.Fatalf("arrived = %+v, want the one new unseen inbox mail", got)
+	}
+	if got[0].ID == 0 || got[0].AccountID != acc.ID || got[0].Snippet == "" {
+		t.Errorf("arrived message incomplete: %+v", got[0])
+	}
+	got = nil
+	if err := svc.SyncAccount(acc); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("a sync with nothing new still reported: %+v", got)
+	}
+}

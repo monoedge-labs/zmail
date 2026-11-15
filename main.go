@@ -65,6 +65,7 @@ func main() {
 		a.dir, a.dbPath, a.priv, a.prefs, a.sec = dir, dbPath, loadPrivacy(dir), loadPrefs(dir), keychain{}
 	}
 	svc.Changed = a.refresh
+	svc.Arrived = a.arrived
 	useUpdater(*demo)
 
 	mygo.App.WhenReady(func() {

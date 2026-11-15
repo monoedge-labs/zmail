@@ -294,6 +294,15 @@ func (s *Store) UpsertMessage(m Message) error {
 	return err
 }
 
+// MessageID is the message's id in the account's folder, 0 when it is not
+// there: how a sync just wrote refers to it again.
+func (s *Store) MessageID(accountID, folder string, uid uint32) int64 {
+	var id int64
+	s.db.QueryRow(`SELECT id FROM messages WHERE account_id=? AND folder=? AND uid=?`,
+		accountID, folder, uid).Scan(&id)
+	return id
+}
+
 const cols = `id, account_id, folder, role, uid, thread_key, from_name, from_addr, subject, snippet, body, date, seen, category, handled_by`
 
 // listCols are cols for a list, whose messages leave their HTML out.

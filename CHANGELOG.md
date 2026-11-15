@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- **Desktop notifications.** A new mail in the inbox raises a macOS notification: the sender as its heading, the subject and snippet as its text, grouped with the app's own. Clicking it brings up the window on that mail. At most the newest five of a sync are shown. The statistics page's "新邮件时显示桌面通知" switch turns them off; the first notification is also how macOS asks for permission.
+- **Notifications stay masked.** With 打码 on, the subject and snippet a notification shows are the masked copy — patterns at once, and the local model's reading as soon as it is done. A notice never carries what the window hides.
+
 ## 0.6.1
 
 - **Intel Macs.** Zmail is built for Intel as well as Apple silicon, for macOS 13 or later. An Intel Mac installs `zmail-0.6.1-amd64.dmg` and updates itself from its own update file; Apple silicon apps update as before.

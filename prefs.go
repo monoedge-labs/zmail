@@ -15,6 +15,9 @@ import (
 type prefs struct {
 	// GroupByLabel groups the mail list by label, in place of by category.
 	GroupByLabel bool `json:"group_by_label"`
+	// NotifyOff turns the desktop notice of new mail off. Notices are on by
+	// default: the first one asks macOS for permission anyway.
+	NotifyOff bool `json:"notify_off"`
 }
 
 func loadPrefs(dir string) (p prefs) {

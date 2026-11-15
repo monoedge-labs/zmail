@@ -152,6 +152,20 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 					choice.Switch(c, &guard, choice.SwitchProps{Size: theme.Small})
 					next.NoLinkGuard = !guard
 				})
+				off := a.prefs.NotifyOff
+				ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
+					ui.Text(c, "新邮件时显示桌面通知").FontSize(13).TextColor(p.soft).Grow(1).
+						Tooltip("收件箱来新邮件时在系统通知里提醒，最多显示最新 5 封；打开窗口的“打码”后通知里同样隐藏敏感信息。第一次提醒时 macOS 会请你允许通知")
+					on := !off
+					choice.Switch(c, &on, choice.SwitchProps{Size: theme.Small})
+					off = !on
+				})
+				if off != a.prefs.NotifyOff {
+					a.prefs.NotifyOff = off
+					if err := a.prefs.save(a.dir); err != nil {
+						a.notice = err.Error()
+					}
+				}
 				a.setPrivacy(next)
 			})
 		})

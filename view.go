@@ -648,7 +648,7 @@ func (a *app) readerPane(c *ui.Context, p pal) {
 // is off, so that its state is seen at a glance.
 func (a *app) shield(c *ui.Context, p pal, compact bool) {
 	on := a.priv.View
-	label, tip, ink, icon := "打码", "隐藏邮件里的邮箱、手机号、证件号、薪资、金额、密钥和验证码；本地模型 AstrLink Guard 还会隐藏姓名和地址", p.muted, icoShieldOff
+	label, tip, ink, icon := "打码", "隐藏邮件里的邮箱、手机号、证件号、薪资、金额、密钥和验证码；本地模型 AstrLink Guard 还会隐藏姓名和地址。新邮件的桌面通知同样打码", p.muted, icoShieldOff
 	state := "打码：已关闭"
 	if on {
 		label, tip, ink, icon = "已打码", "点击显示原文", p.blue, icoShield

@@ -54,6 +54,7 @@ type app struct {
 	settleAt       time.Time // when the frame that finds what the last ones showed is due
 	noPages        bool      // web views cannot be made here: HTML mail shows as its Markdown
 	stamp          string    // the database's files as the last reload found them
+	notices        map[int64]store.Message // new mail whose notice waits on the model
 
 	router *ui.Router
 	nav    string // the sidebar's choice
@@ -220,6 +221,7 @@ func (a *app) async(work func() error) {
 // reload reads what the pages show from the store. Main thread only.
 func (a *app) reload() {
 	a.stamp = dbStamp(a.dbPath)
+	a.notifyFlush()
 	a.accounts, _ = a.st.Accounts()
 	if fs, err := a.st.Folders(""); err == nil {
 		a.folders = a.folders[:0]
