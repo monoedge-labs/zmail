@@ -680,10 +680,12 @@ func (a *app) addAccount() {
 	s.busy, s.err = true, ""
 	go func() {
 		acc, err := a.svc.AddAccount(p.ID, email, secret)
-		if err == nil {
-			err = a.svc.SyncAccount(acc)
-		}
-		a.win.Update(func() { a.finishAdd(err) })
+		a.win.Update(func() {
+			a.finishAdd(err)
+			if err == nil {
+				a.async(func() error { return a.svc.SyncAccount(acc) })
+			}
+		})
 	}()
 }
 
@@ -712,25 +714,35 @@ func (a *app) addGoogleOAuth() {
 	s.busy, s.err = true, ""
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	s.cancel = cancel
+	// AddAccount checks the login already, so the sheet closes once the
+	// account is kept; the first sync runs in the back like every other.
 	work := func() error {
 		defer cancel()
 		tok, err := googleLogin(ctx, id, secret, email, openURL)
 		if err != nil {
 			return err
 		}
-		acc, err := a.svc.AddAccount("google", email, tok)
-		if err != nil {
-			return err
-		}
-		return a.svc.SyncAccount(acc)
+		_, err = a.svc.AddAccount("google", email, tok)
+		return err
 	}
+	sync := func() { a.async(func() error { return a.svc.SyncAll() }) }
 	if a.win == nil { // under test: no window, no other thread
-		a.finishAdd(work())
+		if err := work(); err != nil {
+			a.finishAdd(err)
+			return
+		}
+		a.finishAdd(nil)
+		sync()
 		return
 	}
 	go func() {
 		err := work()
-		a.win.Update(func() { a.finishAdd(err) })
+		a.win.Update(func() {
+			a.finishAdd(err)
+			if err == nil {
+				sync()
+			}
+		})
 	}()
 }
 

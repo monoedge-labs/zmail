@@ -64,3 +64,29 @@ func TestAuthored(t *testing.T) {
 		t.Error("a mail with its own colors keeps white")
 	}
 }
+
+// A mail sized by the viewport asks for viewport + k forever: the second
+// equal growth is refused and the height holds, at minHolds from the start.
+func TestPageHeightTracking(t *testing.T) {
+	p := &mailPage{}
+	p.h.Store(120)
+	p.report(520)  // k = 400
+	p.report(920)  // viewport 520: asks +400 again — held at minHolds
+	p.report(1040) // viewport now 640: still +400 — ignored
+	if got := p.h.Load(); got != minHolds {
+		t.Fatalf("tracking page kept growing to %d", got)
+	}
+	p.report(300) // a real shrink still applies
+	if got := p.h.Load(); got != 300 {
+		t.Fatalf("shrink ignored: %d", got)
+	}
+	// A normal page grows with its content as its pictures come in.
+	p = &mailPage{}
+	p.h.Store(120)
+	for _, n := range []int{700, 900, 900, 1100} {
+		p.report(n)
+	}
+	if got := p.h.Load(); got != 1100 {
+		t.Fatalf("legit growth clipped: %d", got)
+	}
+}

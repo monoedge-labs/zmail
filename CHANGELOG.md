@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.4
+
+- **The sign-in sheet closes once you are in.** Adding an account used to wait for the first sync — up to a minute — while the sheet hung open on "signing in". It closes as soon as the login is checked and the account kept; the first sync runs in the back like every other.
+- **A mail sized to the window no longer grows without end.** A newsletter built on a 100vh block asked for a height taller than itself forever, so its card kept scrolling away. The web view now refuses the second equal growth in a row and holds its height.
+
 ## 0.6.3
 
 - **Google sign-in needs only the address.** The OAuth client ID and secret are built into the app (an installed app's client pair is public by design), so the window's Google sign-in asks just for the mailbox. The "客户端 ID" and "客户端密钥" fields remain for using your own client, and so do `--client-id`, `$ZMAIL_CLIENT_ID` and `$ZMAIL_CLIENT_SECRET` on the command line.

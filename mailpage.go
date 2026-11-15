@@ -20,11 +20,37 @@ type mailPage struct {
 	view *mygo.WebView
 	h    atomic.Int32 // the page's height, which it tells in its title
 	laid atomic.Bool  // it has told its height: the page is laid out
+	grown int32       // the growth last applied; a repeat means the page is tracking the viewport
+}
+
+// minHolds is the height a viewport-tracking page grows to before it holds.
+const minHolds = 640
+
+// report applies a height the page tells. A mail sized by the viewport
+// (min-height: 100vh and a footer below it) wants a height of viewport + k
+// forever: growing it grows the content, and it scrolls away without end.
+// Such a page asks for exactly the growth applied, again and again; the
+// second equal growth in a row is ignored and the page holds what it has.
+// shortcut: a real growth of the same size twice is clipped too — accepted.
+func (p *mailPage) report(n int) {
+	n = min(max(n, 40), 30000)
+	cur := p.h.Load()
+	if d := int32(n) - cur; d > 0 {
+		if d == p.grown {
+			if cur < minHolds { // a short page still holding the start height
+				p.h.Store(minHolds)
+			}
+			return
+		}
+		p.grown = d
+	} else {
+		p.grown = 0
+	}
+	p.h.Store(int32(n))
 }
 
 // The page is someone else's and calls no Go, so it tells its height in its
-// title. ponytail: a page sized by the viewport (100vh) keeps the height it
-// had; measure its content when one shows up.
+// title.
 const (
 	heightMark = "zmail-height:"
 	watchPage  = `const f = () => { document.title = "` + heightMark + `" + Math.ceil(document.documentElement.getBoundingClientRect().height) };
@@ -167,7 +193,7 @@ func (a *app) newPage(m store.Message) *mailPage {
 		e.PreventDefault()
 		if n, ok := strings.CutPrefix(e.Title, heightMark); ok {
 			if h, err := strconv.Atoi(n); err == nil {
-				p.h.Store(int32(min(max(h, 40), 30000)))
+				p.report(h)
 				p.laid.Store(true)
 				a.win.Invalidate()
 			}
