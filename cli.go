@@ -37,8 +37,8 @@ const cliUsage = `zmail — a local mail client for agents
   zmail account add --provider google --email ADDR --oauth [--client-id ID]
                                          sign in through the browser (Google Workspace), with the
                                          client zmail is built with, or yours (ID, or $ZMAIL_CLIENT_ID);
-                                         the client secret comes from $ZMAIL_CLIENT_SECRET,
-                                         or is asked for without echo
+                                         your own client also needs its secret on stdin or
+                                         $ZMAIL_CLIENT_SECRET
   zmail account remove --email ADDR      forget an account and its password here
   zmail sync                             fetch new mail now
   zmail llm show [--json]                the model service behind the window's AI polish
@@ -201,6 +201,9 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 			}
 			id := cmp.Or(*clientID, os.Getenv("ZMAIL_CLIENT_ID"), mailbox.GoogleClientID)
 			cs := os.Getenv("ZMAIL_CLIENT_SECRET")
+			if cs == "" && id == mailbox.GoogleClientID {
+				cs = mailbox.GoogleClientSecret
+			}
 			if cs == "" {
 				fmt.Fprint(os.Stderr, "OAuth client secret: ")
 				var err error
@@ -211,7 +214,7 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 				}
 			}
 			if cs == "" {
-				return fmt.Errorf("--oauth needs the OAuth client secret, on stdin or in $ZMAIL_CLIENT_SECRET")
+				return fmt.Errorf("--oauth with your own --client-id needs its client secret, on stdin or in $ZMAIL_CLIENT_SECRET")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()

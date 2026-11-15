@@ -331,7 +331,7 @@ type service struct{ id, tile, name, hint string }
 // Zmail ships no shared Google client.
 const (
 	googleOAuthHelp = "https://console.cloud.google.com/auth/clients"
-	googleOAuthNote = "Google Cloud 控制台：创建类型为 Desktop app 的 OAuth 客户端，把客户端 ID 和密钥填在上面。Workspace 账号用这条路；项目处于测试状态时，令牌 7 天后失效"
+	googleOAuthNote = "Google Cloud 控制台：留空即用 Zmail 内置的客户端；要换自己的，创建类型为 Desktop app 的 OAuth 客户端并填入 ID 和密钥。项目处于测试状态时，令牌 7 天后失效"
 )
 
 var services = []service{
@@ -470,7 +470,7 @@ func (a *app) signIn(c *ui.Context, p pal) {
 				})
 				ui.Column(c).Gap(6).Children(func() {
 					label("客户端密钥")
-					field.InputPassword(c, &s.clientSecret, field.InputProps{Placeholder: "客户端密钥", Size: theme.Large, Invalid: s.err != ""}).Label("客户端密钥")
+					field.InputPassword(c, &s.clientSecret, field.InputProps{Placeholder: "留空则使用内置密钥", Size: theme.Large, Invalid: s.err != ""}).Label("客户端密钥")
 				})
 			} else {
 				ui.Column(c).Gap(6).Children(func() {

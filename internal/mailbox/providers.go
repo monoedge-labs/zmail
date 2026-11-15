@@ -22,7 +22,7 @@ type Provider struct {
 var Providers = []Provider{
 	{ID: "google", Name: "Google", Host: "imap.gmail.com:993", Secret: "应用专用密码",
 		Help:     "https://support.google.com/accounts/answer/185833",
-		HelpNote: "个人 Gmail：开启两步验证后，在此页创建应用专用密码。Workspace 账号在窗口的 Google 登录里选 OAuth，填入自己的 Desktop 客户端后用浏览器登录；命令行加 --oauth --client-id"},
+		HelpNote: "个人 Gmail：开启两步验证后，在此页创建应用专用密码。Workspace 账号在窗口的 Google 登录里选 OAuth，客户端留空即用内置的；命令行加 --oauth"},
 	{ID: "aliyun", Name: "阿里邮箱", Host: "imap.qiye.aliyun.com:993", Secret: "客户端专用密码",
 		Help:     "https://help.aliyun.com/zh/document_detail/444269.html",
 		HelpNote: "阿里云帮助中心：在网页版“设置 > 账户与安全”生成三方客户端安全密码；个人 @aliyun.com 邮箱用登录密码"},

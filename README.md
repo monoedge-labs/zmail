@@ -118,26 +118,20 @@ every two minutes and picks up accounts added from the command line.
 ### Gmail with OAuth
 
 Google Workspace accounts have not accepted passwords from mail apps since
-2025-05-01, and Zmail ships no shared Google client. You create your own, once:
+2025-05-01, so they sign in with OAuth. Zmail ships a built-in Google client
+(an installed app's client pair is public by design — Google does not treat it
+as a secret), so in the window you only fill in the address: Add account →
+Google (OAuth is already selected), then press “在浏览器中登录”. Personal
+Gmail can switch to “应用专用密码”.
 
-1. In the [Google Cloud console](https://console.cloud.google.com), create a
-   project and open Google Auth Platform. Set the audience to External, or
-   Internal if your Workspace administrator owns the project.
-2. Create an OAuth client of type **Desktop app**. Copy its client ID and secret.
-3. Add your address as a test user.
-4. Sign in. In the window: Add account → Google (OAuth is already selected),
-   fill in the address, client ID and secret, then press “在浏览器中登录”.
-   Personal Gmail can switch to “应用专用密码”. The command line does the same:
+The command line does the same:
 
 ```sh
-zmail account add --provider google --email you@example.com --oauth --client-id <client-id>
-# asks for the client secret without echoing it; or set $ZMAIL_CLIENT_SECRET
+zmail account add --provider google --email you@example.com --oauth
 ```
 
-`--client-id` may also come from `$ZMAIL_CLIENT_ID`. With neither, or with the
-window's “客户端 ID” field left empty, Zmail signs in with the client ID it is
-built with; that client's secret is not shipped, so this is for those who hold
-it.
+`--client-id` (or `$ZMAIL_CLIENT_ID`) overrides the built-in client; your own
+client also needs its secret on stdin or `$ZMAIL_CLIENT_SECRET`.
 
 Zmail opens your browser, receives the answer on a loopback port, and keeps the
 refresh token in the keychain. While the project is in Testing status Google

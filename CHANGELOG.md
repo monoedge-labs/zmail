@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3
+
+- **Google sign-in needs only the address.** The OAuth client ID and secret are built into the app (an installed app's client pair is public by design), so the window's Google sign-in asks just for the mailbox. The "客户端 ID" and "客户端密钥" fields remain for using your own client, and so do `--client-id`, `$ZMAIL_CLIENT_ID` and `$ZMAIL_CLIENT_SECRET` on the command line.
+
 ## 0.6.2
 
 - **Desktop notifications.** A new mail in the inbox raises a macOS notification: the sender as its heading, the subject and snippet as its text, grouped with the app's own. Clicking it brings up the window on that mail. At most the newest five of a sync are shown. The statistics page's "新邮件时显示桌面通知" switch turns them off; the first notification is also how macOS asks for permission.

@@ -232,18 +232,17 @@ func TestGoogleOAuthSheet(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Advance(300e6)
-	if !tt.HasText("请填写邮箱地址和客户端密钥") || gotEmail != "" {
+	if !tt.HasText("请填写邮箱地址") || gotEmail != "" {
 		t.Fatalf("empty form started a login (%q) or hid the error: %q", gotEmail, tt.Texts())
 	}
 
-	// The client ID left empty signs in with the one zmail is built with.
+	// The client ID left empty signs in with the client zmail is built with.
 	a.add.email = "builtin@example.com"
-	a.add.clientSecret = "sec"
 	if err := tt.Click("在浏览器中登录"); err != nil {
 		t.Fatal(err)
 	}
-	if gotEmail != "builtin@example.com" || gotID != mailbox.GoogleClientID {
-		t.Fatalf("login with no client ID: email=%q id=%q", gotEmail, gotID)
+	if gotEmail != "builtin@example.com" || gotID != mailbox.GoogleClientID || gotSecret != mailbox.GoogleClientSecret {
+		t.Fatalf("login with no client ID: email=%q id=%q secret=%q", gotEmail, gotID, gotSecret)
 	}
 	if err := tt.Click("添加账户"); err != nil {
 		t.Fatal(err)

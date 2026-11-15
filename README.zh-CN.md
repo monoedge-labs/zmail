@@ -68,19 +68,15 @@ zmail sync                                                # 立即收取新邮�
 
 ### 用 OAuth 登录 Gmail
 
-从 2025-05-01 起，Google Workspace 账户不再接受邮件应用使用密码登录，而 Zmail 不附带共用的 Google 客户端。你需要自己创建一个，只需一次：
+从 2025-05-01 起，Google Workspace 账户不再接受邮件应用使用密码登录，因此走 OAuth 授权。Zmail 内置了一个 Google 客户端（桌面应用的客户端密钥按 Google 的设计不算机密），所以窗口里只需填邮箱：添加账户 → Google（默认就是 OAuth），点「在浏览器中登录」。个人 Gmail 可切到「应用专用密码」。
 
-1. 在 [Google Cloud 控制台](https://console.cloud.google.com) 创建项目，打开 Google Auth Platform。目标对象选“外部”；如果项目由你的 Workspace 管理员管理，可以选“内部”。
-2. 创建类型为 **Desktop app**（桌面应用）的 OAuth 客户端，复制客户端 ID 和密钥。
-3. 把你的邮箱地址添加为测试用户。
-4. 登录。窗口：添加账户 → Google（默认就是 OAuth），填入邮箱、客户端 ID 和密钥，点「在浏览器中登录」。个人 Gmail 可切到「应用专用密码」。命令行做同样的事：
+命令行做同样的事：
 
 ```sh
-zmail account add --provider google --email you@example.com --oauth --client-id <client-id>
-# 会提示输入客户端密钥，输入不回显；也可以预先设置 $ZMAIL_CLIENT_SECRET
+zmail account add --provider google --email you@example.com --oauth
 ```
 
-`--client-id` 也可以由 `$ZMAIL_CLIENT_ID` 提供。两者都没有时，或者窗口里的“客户端 ID”留空时，Zmail 使用构建时内置的客户端 ID；该客户端的密钥不随应用分发，这种用法适合持有该密钥的人。
+`--client-id`（或 `$ZMAIL_CLIENT_ID`）可换成你自己的客户端；自己的客户端还要在 stdin 或 `$ZMAIL_CLIENT_SECRET` 提供密钥。
 
 Zmail 会打开浏览器，通过本机回环端口接收授权结果，并把刷新令牌保存在钥匙串里。项目处于“测试”状态时，Google 会在 7 天后让令牌过期。同步报告登录失败时再登录一次，或者发布项目的权限请求页面。
 

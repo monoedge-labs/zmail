@@ -696,10 +696,17 @@ func (a *app) addGoogleOAuth() {
 		return
 	}
 	email := strings.TrimSpace(s.email)
-	id := cmp.Or(strings.TrimSpace(s.clientID), mailbox.GoogleClientID) // left empty: the client zmail is built with
-	secret := strings.TrimSpace(s.clientSecret)
-	if !strings.Contains(email, "@") || secret == "" {
-		s.err = "请填写邮箱地址和客户端密钥"
+	if !strings.Contains(email, "@") {
+		s.err = "请填写邮箱地址"
+		return
+	}
+	id := strings.TrimSpace(s.clientID)
+	var secret string
+	if id == "" { // left empty: the client zmail is built with, secret included
+		id = mailbox.GoogleClientID
+		secret = cmp.Or(strings.TrimSpace(s.clientSecret), mailbox.GoogleClientSecret)
+	} else if secret = strings.TrimSpace(s.clientSecret); secret == "" {
+		s.err = "请填写客户端密钥"
 		return
 	}
 	s.busy, s.err = true, ""
