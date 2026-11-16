@@ -270,10 +270,13 @@ func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tint ui.Color
 // ---- mail
 
 func (a *app) mailPage(c *ui.Context, p pal) {
-	ui.Row(c).Grow(1).Gap(8).Padding(8).AlignItems(ui.Stretch).Children(func() {
+	shell := ui.Row(c).Grow(1).Gap(8).Padding(8).AlignItems(ui.Stretch)
+	shell.Children(func() {
 		a.listPane(c, p)
-		a.readerPane(c, p)
+		a.readerPane(c, p, shell)
 	})
+	shell.PointerPosition() // ask for frames wherever the pointer moves in the shell
+
 }
 
 func (a *app) title() string {
@@ -602,14 +605,31 @@ func (a *app) newsRows(c *ui.Context, p pal, idx []int) {
 	}
 }
 
-func (a *app) readerPane(c *ui.Context, p pal) {
+func (a *app) readerPane(c *ui.Context, p pal, shell ui.Element) {
 	pane := ui.Column(c).Basis(480).Grow(3).MinWidth(0).Gap(20).Padding(12, 40, 40).Radius(16).
 		Background(p.readerBg).Border(1, p.readerEdge).Shadow(0, 8, 28, 0, p.shadowSoft)
+	// The wave a thread opens with crosses the pane itself, and the pages in
+	// it with it: their pixels cannot be moved, so paneWaveAt is when the
+	// light over them leaves too (see message).
+	if at, ok := a.paneWave(c); ok {
+		pane.Effect(waveEffect(c, c.Now().Sub(at)))
+	}
 	pane.Children(func() {
 		if !a.hasCur {
-			ui.Column(c).Grow(1).Center().DragWindow().Children(func() {
+			holder := ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).DragWindow()
+			var wv ui.Element
+			holder.Children(func() {
+				// The face sits here bigger than on the statistics page, and its
+				// eyes follow the pointer over the mail list as well: its page
+				// cannot see the pointer there, so faceLook feeds it where it is.
+				wv = a.faceView(c, 120, 96)
 				display.Empty(c, display.EmptyProps{Icon: icoMail, Title: "选择一封邮件"})
 			})
+			if _, _, over := shell.PointerPosition(); over {
+				a.faceLook(shell, wv)
+			} else {
+				a.faceLookAway()
+			}
 			return
 		}
 		a.toolbar(c, p)
@@ -811,11 +831,17 @@ func (a *app) message(c *ui.Context, p pal, m store.Message, lit bool) {
 		switch pg := a.pages[pageKey{m.ID, a.v}]; {
 		case veiled:
 			a.mailHolder(c, p, m.ID, lit)
+		case pg != nil && a.paneWaving:
+			// HTML loads offscreen while the toolbar and mail headers reveal.
+			// A native page paints over this pane's veil, so keep it out of
+			// the scene until that one wave is done; it is shown only once.
+			ui.Box(c).Height(float32(pg.h.Load())).Radius(8)
 		case pg != nil:
 			wv := ui.WebView(c, pg.view).Height(float32(pg.h.Load())).Radius(8)
-			// A page's pixels cannot be moved: the wave's light goes over it,
-			// once the page is laid out.
-			if at, ok := a.waving(c, m.ID, pg.laid.Load()); ok {
+			// A page's pixels cannot be moved: the wave's light goes over it.
+			// Suppressed during the pane's wave: that is one reveal, not two.
+			at, ok := a.waving(c, m.ID, pg.loaded.Load())
+			if ok {
 				wv.Children(func() {
 					// The box around it cuts the light to the page's corners.
 					ui.Box(c).Absolute().Fill().Radius(8).Clip().IgnoreInput(true).Children(func() {
@@ -835,8 +861,10 @@ func (a *app) message(c *ui.Context, p pal, m store.Message, lit bool) {
 			}
 		default:
 			body := ui.Column(c).MaxWidth(680)
-			if at, ok := a.waving(c, m.ID, true); ok {
-				body.Effect(waveEffect(c, c.Now().Sub(at)))
+			if !a.paneWaving {
+				if at, ok := a.waving(c, m.ID, true); ok {
+					body.Effect(waveEffect(c, c.Now().Sub(at)))
+				}
 			}
 			body.Children(func() {
 				if a.priv.View && m.HTML == "" {
@@ -905,6 +933,49 @@ func (a *app) waving(c *ui.Context, id int64, ready bool) (time.Time, bool) {
 	}
 	c.After(time.Second / 60)
 	return at, true
+}
+
+// loaded reports whether every web view the thread needs has finished
+// loading: an HTML mail's page, as it stands in this variant.
+func (a *app) loaded() bool {
+	for _, m := range a.thread {
+		if m.HTML == "" {
+			continue
+		}
+		if pg := a.pages[pageKey{m.ID, a.variant()}]; pg == nil || !pg.loaded.Load() {
+			return false
+		}
+	}
+	return true
+}
+
+// paneWaveWait is how long the pane's wave holds for a page still loading
+// before it crosses anyway.
+const paneWaveWait = 5 * time.Second
+
+// paneWave reports whether the wave a thread opened with is crossing the
+// reader pane, and since when. While its pages still load it holds at its
+// start: the frames stay, and the veil that opens it covers them, so nothing
+// half-drawn shows; the front leaves once they are rendered. It keeps the
+// frames coming while it runs.
+func (a *app) paneWave(c *ui.Context) (time.Time, bool) {
+	if !a.paneWaving {
+		return a.paneWaveAt, false
+	}
+	if a.paneWaveAt.IsZero() && !a.loaded() && time.Since(a.paneWaveArm) < paneWaveWait {
+		// Hold at the wave's start: elapsed of zero keeps its veil down.
+		c.After(time.Second / 60)
+		return c.Now(), true
+	}
+	if a.paneWaveAt.IsZero() {
+		a.paneWaveAt = c.Now()
+	}
+	if c.Now().Sub(a.paneWaveAt) >= waveDuration || c.Preferences().ReduceMotion {
+		a.paneWaving = false
+		return a.paneWaveAt, false
+	}
+	c.After(time.Second / 60)
+	return a.paneWaveAt, true
 }
 
 // feedbackItem opens the project's new-issue page in the browser, where the

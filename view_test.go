@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/monoedge-labs/zmail/internal/mailbox"
@@ -80,7 +82,7 @@ func TestPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Advance(600e6)
-	if !tt.HasText("每日处理的邮件") {
+	if !tt.HasText("每日收到的邮件") {
 		t.Fatalf("stats not shown: %q", tt.Texts())
 	}
 	shot(t, tt, "3-stats")
@@ -194,10 +196,10 @@ func TestGoogleOAuthSheet(t *testing.T) {
 	openURL = func(u string) { opened = append(opened, u) }
 	login := googleLogin
 	var gotID, gotSecret, gotEmail string
-	googleLogin = func(_ context.Context, id, secret, email string, open func(string)) (string, error) {
+	googleLogin = func(_ context.Context, id, secret, email string, open func(string)) (string, string, error) {
 		gotID, gotSecret, gotEmail = id, secret, email
 		open("https://accounts.google.com/o/oauth2/v2/auth?test=1")
-		return `{"client_id":"cid","client_secret":"sec","refresh_token":"rt"}`, nil
+		return `{"client_id":"cid","client_secret":"sec","refresh_token":"rt"}`, "", nil
 	}
 	t.Cleanup(func() { openURL, googleLogin = open, login })
 
@@ -584,9 +586,60 @@ func TestWaveAfterWait(t *testing.T) {
 	if len(a.waveAt) != 0 {
 		t.Errorf("the wave is not over: %v", a.waveAt)
 	}
+	// one whose read ends while the pane's wave crosses the thread is shown
+	// by it: no second wave of its own.
+	a.pend(k)
+	a.pendAt[id] = time.Now().Add(-time.Second)
+	a.paneWaving = true
+	a.keep(k, a.veils[k])
+	a.paneWaving = false
+	if len(a.waveAt) != 0 || len(a.pendAt) != 0 {
+		t.Fatalf("a wait finished during the pane's wave: wave %v, waiting %v", a.waveAt, a.pendAt)
+	}
 	a.open(1) // another thread starts clean
 	if len(a.waveAt) != 0 || len(a.pendAt) != 0 {
 		t.Errorf("left over: %v %v", a.waveAt, a.pendAt)
+	}
+}
+
+// The empty reader's face uses the shell's pointer, including while it is
+// over the mail list, which lies outside the face's own web view.
+func TestFaceTracksOutsideWebView(t *testing.T) {
+	a := testApp(t)
+	a.face = &agentFace{look: [2]float32{float32(math.NaN()), float32(math.NaN())}, css: faceCSS(palFor(false)), size: 96}
+	a.navigate("mail:sent")
+	tt := ui.NewTester(a.view, 1360, 900)
+	if a.hasCur || !tt.HasText("选择一封邮件") {
+		t.Fatalf("empty pane not empty: hasCur=%v texts=%q", a.hasCur, tt.Texts())
+	}
+	tt.SetScale(1)
+	tt.Move(320, 400)
+	tt.Frame()
+
+	if math.IsNaN(float64(a.face.look[0])) || a.face.look[0] == 0 && a.face.look[1] == 0 {
+		t.Fatalf("the face cannot see the pointer over the list: %v", a.face.look)
+	}
+}
+
+// An HTML page omitted while the pane waves stays loaded but unmounted;
+// it must enter without an independent second reveal.
+func TestHTMLRevealsOnceAfterLoad(t *testing.T) {
+	a := testApp(t)
+	pg := &mailPage{view: (*mygo.WebView)(nil)}
+	pg.h.Store(120)
+	pg.loaded.Store(true)
+	a.pages = map[pageKey]*mailPage{{id: 1, v: a.variant()}: pg}
+	a.paneWaving = true
+	tt := ui.NewTester(func(c *ui.Context) {
+		a.message(c, palFor(false), store.Message{ID: 1, HTML: "<p>mail</p>"}, false)
+	}, 680, 600)
+	if len(a.waveAt) != 0 {
+		t.Fatal("the pane also arms a message's wave")
+	}
+	a.paneWaving = false
+	tt.Advance(time.Second / 60)
+	if len(a.waveAt) != 0 {
+		t.Fatal("already loaded HTML reveals again after the pane")
 	}
 }
 

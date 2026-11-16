@@ -45,7 +45,9 @@ func (r *IMAP) do(f func(c *imapclient.Client) error) error {
 		if err != nil {
 			return fmt.Errorf("connect %s: %w", r.host, err)
 		}
+		how := "login"
 		if r.token != nil {
+			how = "oauth"
 			var tok string
 			if tok, err = r.token(); err == nil {
 				err = c.Authenticate(xoauth2{r.user, tok})
@@ -55,7 +57,7 @@ func (r *IMAP) do(f func(c *imapclient.Client) error) error {
 		}
 		if err != nil {
 			c.Close()
-			return fmt.Errorf("login %s: %w", r.user, err)
+			return fmt.Errorf("%s %s: %w", how, r.user, err)
 		}
 		r.c = c
 	}

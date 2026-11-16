@@ -4,3 +4,4 @@ mygo_windows_*.syso
 /zmail
 .DS_Store
 /.env.release
+/mobile/dist/

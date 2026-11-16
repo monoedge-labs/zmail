@@ -72,9 +72,9 @@ func TestOAuthSecretFromStdin(t *testing.T) {
 	t.Setenv("ZMAIL_CLIENT_SECRET", "")
 	var gotID, gotSecret string
 	login := googleLogin
-	googleLogin = func(_ context.Context, id, secret, _ string, _ func(string)) (string, error) {
+	googleLogin = func(_ context.Context, id, secret, _ string, _ func(string)) (string, string, error) {
 		gotID, gotSecret = id, secret
-		return `{"refresh_token":"r"}`, nil
+		return `{"refresh_token":"r"}`, "", nil
 	}
 	t.Cleanup(func() { testDial, googleLogin = nil, login })
 	dir, sec := t.TempDir(), memSecrets{}

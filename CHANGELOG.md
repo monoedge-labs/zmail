@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5
+
+- **The agent's face keeps its disc.** The empty reader pane's avatar used to sit in a dark square: the web view's hole clears the card under it, so the face now paints its own disc in the window's base color, as the statistics page's does.
+- **The face follows the pointer over the mail list.** Its page only hears the pointer over its own web view; the pane now passes it the position as far as the shell's edge, so the eyes move while you browse the list.
+- **A thread reveals once, when it is ready.** The wave crossing the reader pane used to begin while HTML mail still loaded, so content flashed in half-drawn — and a mail whose sensitive parts finished being read mid-wave got a second reveal on top. The pane's wave now holds its veil until every page has loaded (five seconds at most), HTML pages stay unmounted under it until it ends, and a late masked copy joins the reveal already running instead of waving again.
+
 ## 0.6.4
 
 - **The sign-in sheet closes once you are in.** Adding an account used to wait for the first sync — up to a minute — while the sheet hung open on "signing in". It closes as soon as the login is checked and the account kept; the first sync runs in the back like every other.

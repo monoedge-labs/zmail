@@ -26,10 +26,17 @@ func TestGoogleLogin(t *testing.T) {
 	old := googleEndpoint
 	googleEndpoint.TokenURL = tokens.URL
 	defer func() { googleEndpoint = old }()
+	profile := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"emailAddress": "me@example.com"})
+	}))
+	defer profile.Close()
+	oldProfile := gmailProfile
+	gmailProfile = profile.URL
+	defer func() { gmailProfile = oldProfile }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	secret, err := GoogleLogin(ctx, "id", "cs", "me@example.com", func(authURL string) {
+	secret, signed, err := GoogleLogin(ctx, "id", "cs", "me@example.com", func(authURL string) {
 		u, _ := url.Parse(authURL)
 		q := u.Query()
 		if q.Get("login_hint") != "me@example.com" || q.Get("code_challenge_method") != "S256" ||
@@ -45,6 +52,9 @@ func TestGoogleLogin(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if signed != "me@example.com" {
+		t.Errorf("signed = %q", signed)
 	}
 	var s oauthSecret
 	if json.Unmarshal([]byte(secret), &s) != nil || s.RefreshToken != "rt-1" || s.ClientID != "id" || s.ClientSecret != "cs" {
@@ -64,10 +74,33 @@ func TestGoogleLogin(t *testing.T) {
 	}
 }
 
+func TestGoogleLoginUnknownAddress(t *testing.T) {
+	old := googleEndpoint
+	googleEndpoint.TokenURL = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "at", "refresh_token": "rt", "token_type": "Bearer", "expires_in": 3600})
+	})).URL
+	defer func() { googleEndpoint = old }()
+	oldProfile := gmailProfile
+	gmailProfile = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no", http.StatusForbidden)
+	})).URL
+	defer func() { gmailProfile = oldProfile }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, _, err := GoogleLogin(ctx, "id", "cs", "", func(authURL string) {
+		u, _ := url.Parse(authURL)
+		go http.Get(u.Query().Get("redirect_uri") + "/?code=abc&state=" + u.Query().Get("state"))
+	})
+	if err == nil {
+		t.Fatal("a sign-in with no address must fail, not dial IMAP with an empty user")
+	}
+}
+
 func TestGoogleLoginDenied(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := GoogleLogin(ctx, "id", "cs", "me@x.com", func(authURL string) {
+	_, _, err := GoogleLogin(ctx, "id", "cs", "me@x.com", func(authURL string) {
 		u, _ := url.Parse(authURL)
 		q := u.Query()
 		go http.Get(q.Get("redirect_uri") + "/?error=access_denied&state=" + q.Get("state"))

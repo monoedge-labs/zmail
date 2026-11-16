@@ -49,12 +49,17 @@ type app struct {
 	// wave once it is hidden. waveAt is when that wave began, zero until the
 	// frame that first draws it.
 	pendAt, waveAt map[int64]time.Time
-	v              variant   // how messages show in the frame being built
-	late           bool      // this frame held a message without a copy that the frame before did not show
-	settleAt       time.Time // when the frame that finds what the last ones showed is due
-	noPages        bool      // web views cannot be made here: HTML mail shows as its Markdown
-	stamp          string    // the database's files as the last reload found them
-	notices        map[int64]store.Message // new mail whose notice waits on the model
+	// paneWaveAt is when the wave crossing the whole reader pane began,
+	// zero until its first frame; paneWaving arms it as a thread opens and
+	// paneWaveArm is when, waiting out a page that never lays out.
+	paneWaveAt, paneWaveArm time.Time
+	paneWaving              bool
+	v                       variant                 // how messages show in the frame being built
+	late                    bool                    // this frame held a message without a copy that the frame before did not show
+	settleAt                time.Time               // when the frame that finds what the last ones showed is due
+	noPages                 bool                    // web views cannot be made here: HTML mail shows as its Markdown
+	stamp                   string                  // the database's files as the last reload found them
+	notices                 map[int64]store.Message // new mail whose notice waits on the model
 
 	router *ui.Router
 	nav    string // the sidebar's choice
@@ -401,11 +406,12 @@ func (a *app) pend(k veilKey) {
 }
 
 // keep keeps the hidden copy of k. A mail that was seen waiting for it is
-// crossed by the wave as it shows.
+// crossed by the wave as it shows — unless the pane's wave is already
+// crossing the thread it opened: that is the reveal, not a second one.
 func (a *app) keep(k veilKey, e veil) {
 	if t, ok := a.pendAt[k.id]; ok && k.full {
 		delete(a.pendAt, k.id)
-		if time.Since(t) >= beamDelay {
+		if time.Since(t) >= beamDelay && !a.paneWaving {
 			a.waveAt[k.id] = time.Time{}
 		}
 	}
@@ -602,6 +608,10 @@ func (a *app) open(i int) {
 	clear(a.pendAt)
 	clear(a.waveAt)
 	a.thread, _ = a.st.Thread(a.cur.ID)
+	// The new thread is revealed by the wave crossing the whole pane, which
+	// begins on its first frame (see readerPane). Headless it only costs
+	// frames, so tests open without it.
+	a.paneWaveAt, a.paneWaving, a.paneWaveArm = time.Time{}, a.win != nil, time.Now()
 	a.showThread()
 	a.syncPages()
 	if !a.cur.Seen {
@@ -718,9 +728,12 @@ func (a *app) addGoogleOAuth() {
 	// account is kept; the first sync runs in the back like every other.
 	work := func() error {
 		defer cancel()
-		tok, err := googleLogin(ctx, id, secret, email, openURL)
+		tok, signed, err := googleLogin(ctx, id, secret, email, openURL)
 		if err != nil {
 			return err
+		}
+		if signed != "" {
+			email = signed
 		}
 		_, err = a.svc.AddAccount("google", email, tok)
 		return err

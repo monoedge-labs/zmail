@@ -27,7 +27,7 @@ func TestFaceState(t *testing.T) {
 // The page carries the bundle inside one script element: a closing tag in
 // the bundle's strings would end it early.
 func TestFacePage(t *testing.T) {
-	page := facePage("working")
+	page := facePage("working", 40, "transparent")
 	if strings.Count(page, "</script>") != 2 {
 		t.Errorf("want two script elements, got %d closings", strings.Count(page, "</script>"))
 	}

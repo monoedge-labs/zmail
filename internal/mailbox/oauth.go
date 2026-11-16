@@ -42,7 +42,8 @@ type oauthSecret struct {
 }
 
 func (s oauthSecret) config() *oauth2.Config {
-	return &oauth2.Config{ClientID: s.ClientID, ClientSecret: s.ClientSecret, Endpoint: googleEndpoint, Scopes: []string{googleScope}}
+	return &oauth2.Config{ClientID: s.ClientID, ClientSecret: s.ClientSecret, Endpoint: googleEndpoint,
+		Scopes: []string{googleScope}}
 }
 
 // dialIMAP opens an account: with a password, or with OAuth when the secret
@@ -68,10 +69,15 @@ func dialIMAP(a store.Account, secret string) Remote {
 // GoogleLogin signs a Google account in through the browser (code flow with
 // PKCE, answered on a loopback port) and returns the secret to keep for it.
 // open shows the user the address to visit.
-func GoogleLogin(ctx context.Context, clientID, clientSecret, email string, open func(url string)) (string, error) {
+// GoogleLogin signs a Google account in at a page it opens, the code
+// coming back over a loopback redirect. It returns the OAuth secret JSON
+// and the address the sign-in was with, which the account's name is:
+// the email argument is only a login hint, and the sign-in may be with
+// another of the browser's accounts.
+func GoogleLogin(ctx context.Context, clientID, clientSecret, email string, open func(url string)) (secret, signed string, err error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	s := oauthSecret{ClientID: clientID, ClientSecret: clientSecret}
 	cfg := s.config()
@@ -110,21 +116,63 @@ func GoogleLogin(ctx context.Context, clientID, clientSecret, email string, open
 	select {
 	case got = <-ch:
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", "", ctx.Err()
 	}
 	if got.err != nil {
-		return "", got.err
+		return "", "", got.err
 	}
 	tok, err := cfg.Exchange(ctx, got.code, oauth2.VerifierOption(verifier))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if tok.RefreshToken == "" {
-		return "", errors.New("google gave no refresh token; remove Zmail at myaccount.google.com/permissions and try again")
+		return "", "", errors.New("google gave no refresh token; remove Zmail at myaccount.google.com/permissions and try again")
 	}
 	s.RefreshToken = tok.RefreshToken
 	out, err := json.Marshal(s)
-	return string(out), err
+	if err != nil {
+		return "", "", err
+	}
+	if e, err := gmailEmail(ctx, tok.AccessToken); err == nil {
+		signed = e
+	}
+	if signed == "" {
+		signed = email
+	}
+	if signed == "" {
+		return "", "", errors.New("google signed in but the account's address is unknown; type the Gmail address and try again")
+	}
+	return string(out), signed, nil
+}
+
+// gmailProfile is the endpoint an access token reads its account's
+// address from; a var so a test can point it at a stub.
+var gmailProfile = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+
+// gmailEmail is the address an access token signs in as, from the Gmail
+// profile endpoint, which the mail scope alone can read (an ID token
+// would need an extra OpenID grant, and a granted one is not refreshed).
+func gmailEmail(ctx context.Context, accessToken string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gmailProfile, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	var p struct {
+		Email string `json:"emailAddress"`
+	}
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("profile: %s", res.Status)
+	}
+	if err := json.NewDecoder(res.Body).Decode(&p); err != nil {
+		return "", err
+	}
+	return p.Email, nil
 }
 
 // xoauth2 is the SASL XOAUTH2 mechanism Gmail's IMAP takes.
