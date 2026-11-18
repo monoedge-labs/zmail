@@ -1,7 +1,7 @@
 {
   "name": "zmail",
-  "identifier": "dev.zephyr.zmail",
-  "version": "0.6.4",
+  "identifier": "com.zausau.zmail",
+  "version": "0.6.8",
   "out": "build",
   "updates": {
     "publicKey": "fFPYW1rkpmUcaNCESHkSUdD2S/ZdsGiTulXLbfQJnnI=",

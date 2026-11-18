@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.8
+
+- **A malformed message no longer stops the whole folder.** Servers such as QQ can answer a FETCH with a shape the parser refuses — one bad ENVELOPE used to fail the batch, so the sync retried the same message forever and the error bar never cleared. The fetch now lists the UIDs it was after, takes the failed ones one at a time, and keeps a marker for a message it still cannot read: the list shows "(无法解析的邮件)" in its place, and the next sync asks for mail after it.
+- **What a dying connection already read is kept.** A fetch that errors mid-range used to drop every message it had gathered; the sync now saves them before reporting the error.
+
+## 0.6.7
+
+- **Renamed the app bundle to `com.zausau.zmail`.** macOS treats it as a new app identity, so iCloud account sync data starts over under the new name; local mail data and credentials are unaffected.
+
+## 0.6.6
+
+- **Account list syncs across Macs via iCloud.** Configured accounts (`id`, `provider`, `email`, `host`) sync through `NSUbiquitousKeyValueStore` (`accounts` key) on launch, foreground activation, external iCloud updates, and when adding or removing accounts.
+- **Credentials stay local.** App passwords and OAuth tokens never leave your Mac's login keychain. Accounts synced onto another Mac appear with a "待登录" badge and a one-click "登录" prompt that opens the sign-in sheet with the provider and address pre-filled.
+
+## 0.6.5
+
+- **The agent's face keeps its disc.** The empty reader pane's avatar used to sit in a dark square: the web view's hole clears the card under it, so the face now paints its own disc in the window's base color, as the statistics page's does.
+- **The face follows the pointer over the mail list.** Its page only hears the pointer over its own web view; the pane now passes it the position as far as the shell's edge, so the eyes move while you browse the list.
+- **A thread reveals once, when it is ready.** The wave crossing the reader pane used to begin while HTML mail still loaded, so content flashed in half-drawn — and a mail whose sensitive parts finished being read mid-wave got a second reveal on top. The pane's wave now holds its veil until every page has loaded (five seconds at most), HTML pages stay unmounted under it until it ends, and a late masked copy joins the reveal already running instead of waving again.
+
 ## 0.6.4
 
 - **The sign-in sheet closes once you are in.** Adding an account used to wait for the first sync — up to a minute — while the sheet hung open on "signing in". It closes as soon as the login is checked and the account kept; the first sync runs in the back like every other.

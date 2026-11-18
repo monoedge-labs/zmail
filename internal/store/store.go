@@ -11,6 +11,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite" // pure Go driver: MyGo builds without cgo
+
+	"github.com/monoedge-labs/zmail/internal/redact"
 )
 
 // Roles of a folder. Every message carries the role of the folder it is in.
@@ -79,6 +81,8 @@ type DayCount struct {
 	Agent     int
 	Me        int
 	Untouched int
+	ByCategory map[string]int // category -> mails received that day
+	Codes      int            // mails holding a verification code
 }
 
 type Stats struct {
@@ -90,6 +94,8 @@ type Stats struct {
 	Days                    []DayCount
 	AgentOps                map[string]int // tool name -> calls
 	AgentHandled, MeHandled int
+	ByCategory              map[string]int // category -> mails received
+	Codes                   int            // mails holding a verification code
 	AgentLast               time.Time // the agent's latest call, whatever the range
 }
 
@@ -535,7 +541,7 @@ func (s *Store) Clients(since time.Time) (map[string]int, error) {
 
 // Stats summarises the mail received since a time, grouped as the statistics page shows it.
 func (s *Store) Stats(since time.Time) (Stats, error) {
-	st := Stats{ByAccount: map[string]int{}, AgentOps: map[string]int{}}
+	st := Stats{ByAccount: map[string]int{}, AgentOps: map[string]int{}, ByCategory: map[string]int{}}
 	one := func(q string, args ...any) int {
 		var n int
 		s.db.QueryRow(q, args...).Scan(&n)
@@ -595,6 +601,48 @@ func (s *Store) Stats(since time.Time) (Stats, error) {
 			st.Days[i].Me += n
 		default:
 			st.Days[i].Untouched += n
+		}
+	}
+	rows.Close()
+
+	rows, err = s.db.Query(`SELECT category, COUNT(*) FROM messages WHERE role NOT IN (?, 'junk') AND date>=? GROUP BY category`, RoleSent, since.Unix())
+	if err != nil {
+		return st, err
+	}
+	for rows.Next() {
+		var cat string
+		var n int
+		rows.Scan(&cat, &n)
+		st.ByCategory[cat] += n
+	}
+	rows.Close()
+
+	// Per day, what kinds arrived and how many held a code. The code is a
+	// pattern, not a column: the subject and the snippet carry it, so the
+	// scan shares the rows with a category split in one pass.
+	rows, err = s.db.Query(`SELECT strftime('%Y-%m-%d', date, 'unixepoch', 'localtime') d, category, subject, snippet
+		FROM messages WHERE role NOT IN (?, 'junk') AND date>=?`, RoleSent, since.Unix())
+	if err != nil {
+		return st, err
+	}
+	di := map[string]int{}
+	for i, d := range st.Days {
+		di[d.Day] = i
+	}
+	for rows.Next() {
+		var d, cat, sub, snip string
+		rows.Scan(&d, &cat, &sub, &snip)
+		if i, ok := di[d]; ok {
+			if st.Days[i].ByCategory == nil {
+				st.Days[i].ByCategory = map[string]int{}
+			}
+			st.Days[i].ByCategory[cat]++
+		}
+		if redact.HasCode(sub + " " + snip) {
+			st.Codes++
+			if i, ok := di[d]; ok {
+				st.Days[i].Codes++
+			}
 		}
 	}
 	rows.Close()

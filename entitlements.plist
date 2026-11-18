@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.application-identifier</key>
+	<string>7L67CATY4T.com.zausau.zmail</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>7L67CATY4T</string>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>7L67CATY4T.com.zausau.zmail</string>
+</dict>
+</plist>

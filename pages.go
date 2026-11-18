@@ -17,6 +17,7 @@ import (
 
 	"github.com/monoedge-labs/zmail/internal/guard"
 	"github.com/monoedge-labs/zmail/internal/mailbox"
+	"github.com/monoedge-labs/zmail/internal/store"
 )
 
 // page is the frame of the statistics page: a title with what
@@ -81,10 +82,14 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 		})
 		columns(c, 16, func() {
 			panel(c, p, p.cardHi).Gap(16).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "每日收到的邮件").FontSize(16).FontWeight(600).TextColor(p.ink).Grow(1)
+					ui.Text(c, fmt.Sprintf("共 %d", s.Received)).FontSize(13).TextColor(p.muted)
+				})
 				ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
-					ui.Text(c, "每日处理的邮件").FontSize(16).FontWeight(600).TextColor(p.ink).Grow(1)
 					legend(c, p, p.orange, fmt.Sprintf("Agent 处理 %d", s.AgentHandled))
 					legend(c, p, p.blue, fmt.Sprintf("我处理 %d", s.MeHandled))
+					legend(c, p, p.hair, fmt.Sprintf("未处理 %d", s.Received-s.AgentHandled-s.MeHandled))
 				})
 				a.dayBars(c, p)
 			})
@@ -98,6 +103,21 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 			})
 			a.cliPanel(c, p)
 		}, func() {
+			if len(s.ByCategory)+s.Codes > 0 {
+				panel(c, p, p.card).Children(func() {
+					ui.Text(c, "分类").FontSize(16).FontWeight(600).TextColor(p.ink)
+					var rows []barRow
+					for _, cat := range catOrder {
+						if n := s.ByCategory[cat]; n > 0 {
+							rows = append(rows, barRow{catLabel[cat], n})
+						}
+					}
+					if s.Codes > 0 {
+						rows = append(rows, barRow{"验证码", s.Codes})
+					}
+					bars(c, p, rows)
+				})
+			}
 			panel(c, p, p.card).Children(func() {
 				ui.Text(c, "来信最多").FontSize(16).FontWeight(600).TextColor(p.ink)
 				var rows []barRow
@@ -112,7 +132,7 @@ func (a *app) statsPage(c *ui.Context, p pal) {
 			})
 			panel(c, p, p.card).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
-					a.faceView(c)
+					a.faceView(c, faceBox, faceSize)
 					ui.Text(c, "Agent 的操作").FontSize(16).FontWeight(600).TextColor(p.ink)
 				})
 				var ops []barRow
@@ -240,12 +260,30 @@ func legend(c *ui.Context, p pal, col ui.Color, label string) {
 	})
 }
 
-// dayBars stacks each day's handled mail: agents below, me above.
+// dayTip is a day's whole count at a glance: how many arrived, who is left
+// to read, and what they were.
+func dayTip(d store.DayCount) string {
+	tip := fmt.Sprintf("%s · 共 %d · Agent %d · 我 %d", d.Day, d.Agent+d.Me+d.Untouched, d.Agent, d.Me)
+	if d.Untouched > 0 {
+		tip += fmt.Sprintf(" · 未读 %d", d.Untouched)
+	}
+	for _, cat := range catOrder {
+		if n := d.ByCategory[cat]; n > 0 {
+			tip += fmt.Sprintf(" · %s %d", catLabel[cat], n)
+		}
+	}
+	if d.Codes > 0 {
+		tip += fmt.Sprintf(" · 验证码 %d", d.Codes)
+	}
+	return tip
+}
+
+// dayBars stacks each day's mail: untouched below, then agents', then mine.
 func (a *app) dayBars(c *ui.Context, p pal) {
 	days := a.stats.Days
 	peak := 1
 	for _, d := range days {
-		peak = max(peak, d.Agent+d.Me)
+		peak = max(peak, d.Agent+d.Me+d.Untouched)
 	}
 	top := (peak + 9) / 10 * 10
 	const h = 180
@@ -264,10 +302,11 @@ func (a *app) dayBars(c *ui.Context, p pal) {
 				}
 				ui.Row(c).Fill().AlignItems(ui.End).Justify(ui.SpaceAround).Children(func() {
 					for _, d := range days {
-						ui.Column(c).Width(barWidth(len(days))).Justify(ui.End).Gap(2).
-							Tooltip(fmt.Sprintf("%s · Agent %d · 我 %d", d.Day, d.Agent, d.Me)).Children(func() {
-							ui.Box(c).Height(scale(d.Me)).Background(p.blue).Radius(4, 4, 0, 0)
+						ui.Column(c).MinWidth(0).Grow(1).MaxWidth(barWidth(len(days))).Justify(ui.End).Gap(2).
+							Tooltip(dayTip(d)).Children(func() {
+							ui.Box(c).Height(scale(d.Me)).Background(p.blue)
 							ui.Box(c).Height(scale(d.Agent)).Background(p.orange)
+							ui.Box(c).Height(scale(d.Untouched)).Background(p.hair).Radius(4, 4, 0, 0)
 						})
 					}
 				})
@@ -283,12 +322,16 @@ func (a *app) dayBars(c *ui.Context, p pal) {
 							label = t.Format("1/2")
 						}
 					}
-					ui.Text(c, label).FontSize(12).TextColor(p.muted).Width(barWidth(len(days))).TextAlign(ui.Center).NoWrap()
+					ui.Text(c, label).FontSize(12).TextColor(p.muted).MinWidth(0).Grow(1).MaxWidth(barWidth(len(days))).TextAlign(ui.Center).NoWrap()
 				}
 			})
 		})
 	})
 }
+
+// catLabel names a category for the statistics, in catOrder's order.
+var catLabel = map[string]string{store.CatPerson: "人", store.CatNotification: "通知", store.CatNewsletter: "订阅 / 推广"}
+var catOrder = []string{store.CatPerson, store.CatNotification, store.CatNewsletter}
 
 func barWidth(n int) float32 {
 	if n <= 7 {

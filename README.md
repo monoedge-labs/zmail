@@ -19,6 +19,7 @@ noncommercial use. Commercial use needs a license from the maintainer, see
 - Keeps everything in a local SQLite database. Nothing goes to a server of ours:
   there is none.
 - Keeps passwords and tokens in the macOS keychain. Agents cannot read them.
+- Syncs the list of configured accounts (provider, address and host — never passwords or tokens) across your Macs via iCloud (`NSUbiquitousKeyValueStore`). Synced accounts prompt once for their credential on a new Mac.
 - Reaches agents through the command line alone: each `zmail` call is a
   subprocess that reads arguments and writes stdout (stdio). Zmail runs no
   daemon and listens on no port.
@@ -88,7 +89,7 @@ Maintainers: `scripts/release.sh` signs the update files with the key from
 `mygo keygen`, read from `$MYGO_UPDATER_PRIVATE_KEY`, else from
 `~/Library/Application Support/mygo/update-keys/mygo-update.key`. A
 `.env.release` file at the root of the repository, which Git ignores, may set
-`MYGO_UPDATER_PRIVATE_KEY`, `MACOS_SIGNING_IDENTITY` and `NOTARY_PROFILE` for
+`MYGO_UPDATER_PRIVATE_KEY`, `MACOS_SIGNING_IDENTITY`, `MACOS_PROVISIONING_PROFILE` and `NOTARY_PROFILE` for
 your machine; the script reads it first. The public
 key is `updates.publicKey` in `mygo.json`. The secret key stays out of the
 repository, because apps accept only updates signed with it. Without the key
@@ -113,7 +114,7 @@ zmail sync                                                # fetch new mail now
 ```
 
 Providers are `google`, `aliyun`, `qq` and `icloud`. The window app also syncs
-every two minutes and picks up accounts added from the command line.
+every two minutes, merges iCloud account changes on startup and activation, and picks up accounts added from the command line.
 
 ### Gmail with OAuth
 

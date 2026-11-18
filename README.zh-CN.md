@@ -12,6 +12,7 @@ Zmail 以 [PolyForm Noncommercial License 1.0.0](LICENSE) **公开源代码**：
 - 把收件箱分成“人”“通知”“订阅”三类。
 - 所有数据保存在本地 SQLite 数据库里。我们没有服务器，邮件不会发到任何服务器。
 - 密码和令牌保存在 macOS 钥匙串里，agent 读取不到。
+- 通过 iCloud（`NSUbiquitousKeyValueStore`）在你的多台 Mac 间同步邮箱账户配置（服务商、地址和 host，不含密码或令牌）；新机器上同步过来的账户只需按提示补登一次凭据。
 - 只通过命令行接入 agent：每次 `zmail` 调用是一个子进程，从参数读入、向标准输出写出（stdio）。Zmail 没有常驻进程，也不监听任何端口。
 
 | 邮箱 | 登录方式 | 获取方式（官方帮助页） |
@@ -51,7 +52,7 @@ Zmail 会在后台检查新版本：打开 10 秒后检查一次，之后每天�
 
 0.4.0 及更早的版本没有内置公钥，需要手动更新一次：下载下一个发布的磁盘映像，把 Zmail 拖进“应用程序”。从那个版本起，应用会自己更新。
 
-维护者：`scripts/release.sh` 用 `mygo keygen` 生成的密钥给更新文件签名，密钥取自 `$MYGO_UPDATER_PRIVATE_KEY`，没有设置时取自 `~/Library/Application Support/mygo/update-keys/mygo-update.key`。仓库根目录下的 `.env.release`（Git 已忽略）可以为本机设置 `MYGO_UPDATER_PRIVATE_KEY`、`MACOS_SIGNING_IDENTITY` 和 `NOTARY_PROFILE`，脚本会先读取它。对应的公钥是 `mygo.json` 里的 `updates.publicKey`。私钥不要放进仓库，因为应用只接受用它签名的更新。没有密钥时，构建会跳过更新文件。每个发布的版本都要在 `CHANGELOG.md` 里有一节 `## <版本号>`，它会成为更新窗口里的更新说明；带签名的构建缺少这一节会失败。设置好上文的签名和公证变量后，`scripts/release.sh -upload` 会把磁盘映像和更新文件上传到一个草稿 release。发布后应用才能看到该版本（`gh release edit vX.Y.Z --draft=false`），草稿对应用不可见。
+维护者：`scripts/release.sh` 用 `mygo keygen` 生成的密钥给更新文件签名，密钥取自 `$MYGO_UPDATER_PRIVATE_KEY`，没有设置时取自 `~/Library/Application Support/mygo/update-keys/mygo-update.key`。仓库根目录下的 `.env.release`（Git 已忽略）可以为本机设置 `MYGO_UPDATER_PRIVATE_KEY`、`MACOS_SIGNING_IDENTITY`、`MACOS_PROVISIONING_PROFILE` 和 `NOTARY_PROFILE`，脚本会先读取它。对应的公钥是 `mygo.json` 里的 `updates.publicKey`。私钥不要放进仓库，因为应用只接受用它签名的更新。没有密钥时，构建会跳过更新文件。每个发布的版本都要在 `CHANGELOG.md` 里有一节 `## <版本号>`，它会成为更新窗口里的更新说明；带签名的构建缺少这一节会失败。设置好上文的签名和公证变量后，`scripts/release.sh -upload` 会把磁盘映像和更新文件上传到一个草稿 release。发布后应用才能看到该版本（`gh release edit vX.Y.Z --draft=false`），草稿对应用不可见。
 
 ## 添加账户
 
@@ -64,7 +65,7 @@ zmail account remove --email you@qq.com
 zmail sync                                                # 立即收取新邮件
 ```
 
-可用的服务商是 `google`、`aliyun`、`qq` 和 `icloud`。窗口应用也会每两分钟同步一次，并自动加载从命令行添加的账户。
+可用的服务商是 `google`、`aliyun`、`qq` 和 `icloud`。窗口应用也会每两分钟同步一次，在启动和回到前台时合并 iCloud 账户配置，并自动加载从命令行添加的账户。
 
 ### 用 OAuth 登录 Gmail
 

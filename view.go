@@ -249,7 +249,9 @@ func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tint ui.Color
 			w, col = 600, p.ink
 		}
 		ui.Text(c, label).SingleLine().Grow(1).FontWeight(w).TextColor(col)
-		if count > 0 {
+		if strings.HasPrefix(id, "acct:") && a.needAuth[strings.TrimPrefix(id, "acct:")] {
+			ui.Text(c, "待登录").FontSize(12).FontWeight(600).TextColor(p.orange)
+		} else if count > 0 {
 			t := ui.Text(c, fmt.Sprint(count)).FontSize(12).TextColor(p.soft)
 			if hot {
 				t.TextColor(p.blue).FontWeight(600)
@@ -270,10 +272,13 @@ func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tint ui.Color
 // ---- mail
 
 func (a *app) mailPage(c *ui.Context, p pal) {
-	ui.Row(c).Grow(1).Gap(8).Padding(8).AlignItems(ui.Stretch).Children(func() {
+	shell := ui.Row(c).Grow(1).Gap(8).Padding(8).AlignItems(ui.Stretch)
+	shell.Children(func() {
 		a.listPane(c, p)
-		a.readerPane(c, p)
+		a.readerPane(c, p, shell)
 	})
+	shell.PointerPosition() // ask for frames wherever the pointer moves in the shell
+
 }
 
 func (a *app) title() string {
@@ -335,6 +340,7 @@ func (a *app) listPane(c *ui.Context, p pal) {
 		if a.notice != "" {
 			ui.Text(c, a.notice).FontSize(12).TextColor(p.danger)
 		}
+		a.authBanner(c, p)
 
 		// The search above may have reloaded the rows: group them after it.
 		people, notes, news, _ := a.groups()
@@ -388,6 +394,50 @@ func (a *app) listPane(c *ui.Context, p pal) {
 // byLabel is whether the list is grouped by label now. It is only once some
 // mail has a label, so that a user of none sees the usual groups.
 func (a *app) byLabel() bool { return a.prefs.GroupByLabel && a.anyLabel }
+
+func (a *app) pendingAuthAccounts() []store.Account {
+	var out []store.Account
+	if strings.HasPrefix(a.nav, "acct:") {
+		id := strings.TrimPrefix(a.nav, "acct:")
+		for _, acc := range a.accounts {
+			if acc.ID == id && a.needAuth[acc.ID] {
+				out = append(out, acc)
+			}
+		}
+		return out
+	}
+	if a.nav == "mail:inbox" {
+		for _, acc := range a.accounts {
+			if a.needAuth[acc.ID] {
+				out = append(out, acc)
+			}
+		}
+	}
+	return out
+}
+
+func (a *app) authBanner(c *ui.Context, p pal) {
+	pending := a.pendingAuthAccounts()
+	if len(pending) == 0 {
+		return
+	}
+	ui.Column(c).Gap(6).Padding(10, 12).Radius(12).Background(p.orange.Alpha(.12)).Children(func() {
+		ui.Text(c, "以下账户已从 iCloud 同步，请在当前 Mac 登录一次以开始收信：").FontSize(12).TextColor(p.orange)
+		for _, acc := range pending {
+			ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Text(c, acc.Email).FontSize(13).FontWeight(500).TextColor(p.ink).SingleLine().Grow(1).MinWidth(0)
+				b := ui.ButtonBase(c).Height(26).Padding(0, 10).Radius(13).Label("登录 " + acc.Email)
+				b.Children(func() { ui.Text(c, "登录").FontSize(12).FontWeight(600).TextColor(p.orange) })
+				if b.Hovered() {
+					b.Background(p.orange.Alpha(.16))
+				}
+				if b.Clicked() {
+					a.openAccountSignIn(acc)
+				}
+			})
+		}
+	})
+}
 
 // rowKey identifies a row among the others: the mail's ID, and its group
 // when the list is grouped by label, as one mail may stand in several.
@@ -602,14 +652,31 @@ func (a *app) newsRows(c *ui.Context, p pal, idx []int) {
 	}
 }
 
-func (a *app) readerPane(c *ui.Context, p pal) {
+func (a *app) readerPane(c *ui.Context, p pal, shell ui.Element) {
 	pane := ui.Column(c).Basis(480).Grow(3).MinWidth(0).Gap(20).Padding(12, 40, 40).Radius(16).
 		Background(p.readerBg).Border(1, p.readerEdge).Shadow(0, 8, 28, 0, p.shadowSoft)
+	// The wave a thread opens with crosses the pane itself, and the pages in
+	// it with it: their pixels cannot be moved, so paneWaveAt is when the
+	// light over them leaves too (see message).
+	if at, ok := a.paneWave(c); ok {
+		pane.Effect(waveEffect(c, c.Now().Sub(at)))
+	}
 	pane.Children(func() {
 		if !a.hasCur {
-			ui.Column(c).Grow(1).Center().DragWindow().Children(func() {
+			holder := ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).DragWindow()
+			var wv ui.Element
+			holder.Children(func() {
+				// The face sits here bigger than on the statistics page, and its
+				// eyes follow the pointer over the mail list as well: its page
+				// cannot see the pointer there, so faceLook feeds it where it is.
+				wv = a.faceView(c, 120, 96)
 				display.Empty(c, display.EmptyProps{Icon: icoMail, Title: "选择一封邮件"})
 			})
+			if _, _, over := shell.PointerPosition(); over {
+				a.faceLook(shell, wv)
+			} else {
+				a.faceLookAway()
+			}
 			return
 		}
 		a.toolbar(c, p)
@@ -811,11 +878,17 @@ func (a *app) message(c *ui.Context, p pal, m store.Message, lit bool) {
 		switch pg := a.pages[pageKey{m.ID, a.v}]; {
 		case veiled:
 			a.mailHolder(c, p, m.ID, lit)
+		case pg != nil && a.paneWaving:
+			// HTML loads offscreen while the toolbar and mail headers reveal.
+			// A native page paints over this pane's veil, so keep it out of
+			// the scene until that one wave is done; it is shown only once.
+			ui.Box(c).Height(float32(pg.h.Load())).Radius(8)
 		case pg != nil:
 			wv := ui.WebView(c, pg.view).Height(float32(pg.h.Load())).Radius(8)
-			// A page's pixels cannot be moved: the wave's light goes over it,
-			// once the page is laid out.
-			if at, ok := a.waving(c, m.ID, pg.laid.Load()); ok {
+			// A page's pixels cannot be moved: the wave's light goes over it.
+			// Suppressed during the pane's wave: that is one reveal, not two.
+			at, ok := a.waving(c, m.ID, pg.loaded.Load())
+			if ok {
 				wv.Children(func() {
 					// The box around it cuts the light to the page's corners.
 					ui.Box(c).Absolute().Fill().Radius(8).Clip().IgnoreInput(true).Children(func() {
@@ -835,8 +908,10 @@ func (a *app) message(c *ui.Context, p pal, m store.Message, lit bool) {
 			}
 		default:
 			body := ui.Column(c).MaxWidth(680)
-			if at, ok := a.waving(c, m.ID, true); ok {
-				body.Effect(waveEffect(c, c.Now().Sub(at)))
+			if !a.paneWaving {
+				if at, ok := a.waving(c, m.ID, true); ok {
+					body.Effect(waveEffect(c, c.Now().Sub(at)))
+				}
 			}
 			body.Children(func() {
 				if a.priv.View && m.HTML == "" {
@@ -905,6 +980,49 @@ func (a *app) waving(c *ui.Context, id int64, ready bool) (time.Time, bool) {
 	}
 	c.After(time.Second / 60)
 	return at, true
+}
+
+// loaded reports whether every web view the thread needs has finished
+// loading: an HTML mail's page, as it stands in this variant.
+func (a *app) loaded() bool {
+	for _, m := range a.thread {
+		if m.HTML == "" {
+			continue
+		}
+		if pg := a.pages[pageKey{m.ID, a.variant()}]; pg == nil || !pg.loaded.Load() {
+			return false
+		}
+	}
+	return true
+}
+
+// paneWaveWait is how long the pane's wave holds for a page still loading
+// before it crosses anyway.
+const paneWaveWait = 5 * time.Second
+
+// paneWave reports whether the wave a thread opened with is crossing the
+// reader pane, and since when. While its pages still load it holds at its
+// start: the frames stay, and the veil that opens it covers them, so nothing
+// half-drawn shows; the front leaves once they are rendered. It keeps the
+// frames coming while it runs.
+func (a *app) paneWave(c *ui.Context) (time.Time, bool) {
+	if !a.paneWaving {
+		return a.paneWaveAt, false
+	}
+	if a.paneWaveAt.IsZero() && !a.loaded() && time.Since(a.paneWaveArm) < paneWaveWait {
+		// Hold at the wave's start: elapsed of zero keeps its veil down.
+		c.After(time.Second / 60)
+		return c.Now(), true
+	}
+	if a.paneWaveAt.IsZero() {
+		a.paneWaveAt = c.Now()
+	}
+	if c.Now().Sub(a.paneWaveAt) >= waveDuration || c.Preferences().ReduceMotion {
+		a.paneWaving = false
+		return a.paneWaveAt, false
+	}
+	c.After(time.Second / 60)
+	return a.paneWaveAt, true
 }
 
 // feedbackItem opens the project's new-issue page in the browser, where the

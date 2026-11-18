@@ -3,6 +3,7 @@ package mailbox
 import (
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -29,23 +30,32 @@ const maxFetchedBody = 128 << 10 // bytes of each message read from the server
 type IMAP struct {
 	host, user, pass string
 	token            func() (string, error) // an OAuth access token, in place of pass
+	dial             func(addr string) (*imapclient.Client, error)
 
 	mu sync.Mutex
 	c  *imapclient.Client
 }
 
 // NewIMAP returns a Remote for host ("imap.example.com:993", TLS) and a login.
-func NewIMAP(host, user, pass string) *IMAP { return &IMAP{host: host, user: user, pass: pass} }
+func NewIMAP(host, user, pass string) *IMAP {
+	return &IMAP{host: host, user: user, pass: pass, dial: dialTLS}
+}
 
 func (r *IMAP) do(f func(c *imapclient.Client) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.c == nil {
-		c, err := dialTLS(r.host)
+		dial := r.dial
+		if dial == nil {
+			dial = dialTLS
+		}
+		c, err := dial(r.host)
 		if err != nil {
 			return fmt.Errorf("connect %s: %w", r.host, err)
 		}
+		how := "login"
 		if r.token != nil {
+			how = "oauth"
 			var tok string
 			if tok, err = r.token(); err == nil {
 				err = c.Authenticate(xoauth2{r.user, tok})
@@ -55,7 +65,7 @@ func (r *IMAP) do(f func(c *imapclient.Client) error) error {
 		}
 		if err != nil {
 			c.Close()
-			return fmt.Errorf("login %s: %w", r.user, err)
+			return fmt.Errorf("%s %s: %w", how, r.user, err)
 		}
 		r.c = c
 	}
@@ -201,7 +211,63 @@ func folderRole(name string, attrs []imap.MailboxAttr) string {
 	return "other"
 }
 
+// fetchBodySection is the one part of a message a sync asks for: its start.
+var fetchBodySection = &imap.FetchItemBodySection{Peek: true, Partial: &imap.SectionPartial{Offset: 0, Size: maxFetchedBody}}
+
+// oneFetch asks the server for set and turns its answer into headers. A
+// message whose envelope the server did not send, or the parser refused,
+// is not in the result; err is what stopped the read, when one did.
+func oneFetch(c *imapclient.Client, set imap.NumSet, afterUID uint32) ([]Header, error) {
+	msgs, err := c.Fetch(set, &imap.FetchOptions{
+		UID: true, Flags: true, Envelope: true, InternalDate: true,
+		BodySection: []*imap.FetchItemBodySection{fetchBodySection},
+	}).Collect()
+	var out []Header
+	for _, m := range msgs {
+		if m.Envelope == nil || (afterUID > 0 && uint32(m.UID) <= afterUID) {
+			continue
+		}
+		out = append(out, headerOf(c, m))
+	}
+	return out, err
+}
+
+func headerOf(c *imapclient.Client, m *imapclient.FetchMessageBuffer) Header {
+	h := Header{UID: uint32(m.UID), MessageID: m.Envelope.MessageID, Subject: m.Envelope.Subject, Date: m.Envelope.Date}
+	if h.Date.IsZero() {
+		h.Date = m.InternalDate
+	}
+	if len(m.Envelope.From) > 0 {
+		h.FromName, h.FromAddr = m.Envelope.From[0].Name, m.Envelope.From[0].Addr()
+	}
+	for _, f := range m.Flags {
+		if f == imap.FlagSeen {
+			h.Seen = true
+		}
+	}
+	if len(m.BodySection) > 0 {
+		h.Body, h.HTML, h.ListUnsub = parseBody(m.BodySection[0].Bytes)
+		if hasCID(h.HTML) {
+			h.HTML = inlineImages(c, m.UID, h.HTML)
+		}
+	}
+	return h
+}
+
+// degradable reports whether err is one message's malformed server response
+// rather than the connection dying: the first lets the sync skip the message
+// and carry on, the second must stop it.
+func degradable(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return false
+	}
+	return strings.Contains(err.Error(), "imapwire:")
+}
+
 func (r *IMAP) Fetch(folder string, afterUID uint32, limit int) (out []Header, err error) {
+	var set imap.NumSet
+	var batchErr error
 	err = r.do(func(c *imapclient.Client) error {
 		sel, err := c.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
 		if err != nil {
@@ -210,7 +276,6 @@ func (r *IMAP) Fetch(folder string, afterUID uint32, limit int) (out []Header, e
 		if sel.NumMessages == 0 {
 			return nil
 		}
-		var set imap.NumSet
 		if afterUID == 0 {
 			start := uint32(1)
 			if sel.NumMessages > uint32(limit) {
@@ -224,43 +289,81 @@ func (r *IMAP) Fetch(folder string, afterUID uint32, limit int) (out []Header, e
 			s.AddRange(imap.UID(afterUID+1), 0) // 0 is "*"; the server may still return the last message
 			set = s
 		}
-		msgs, err := c.Fetch(set, &imap.FetchOptions{
-			UID: true, Flags: true, Envelope: true, InternalDate: true,
-			BodySection: []*imap.FetchItemBodySection{{Peek: true, Partial: &imap.SectionPartial{Offset: 0, Size: maxFetchedBody}}},
-		}).Collect()
+		var hs []Header
+		hs, batchErr = oneFetch(c, set, afterUID)
+		out = append(out, hs...)
+		return batchErr
+	})
+	if err != nil && !degradable(err) {
+		return out, err
+	}
+	// batchErr != nil: a message in the batch broke the parser, and with it
+	// the connection. On a fresh one, list the UIDs the batch meant to cover
+	// (the same set: the server answers every FETCH line with its UID) and
+	// take each of them one at a time.
+	var pending []imap.UID
+	flags := map[imap.UID]bool{}
+	dates := map[imap.UID]time.Time{}
+	have := map[imap.UID]bool{}
+	for _, h := range out {
+		have[imap.UID(h.UID)] = true
+	}
+	err = r.do(func(c *imapclient.Client) error {
+		if _, err := c.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+			return err
+		}
+		fmeta, err := c.Fetch(set, &imap.FetchOptions{UID: true, Flags: true, InternalDate: true}).Collect()
 		if err != nil {
 			return err
 		}
-		for _, m := range msgs {
-			if m.Envelope == nil || (afterUID > 0 && uint32(m.UID) <= afterUID) {
+		for _, m := range fmeta {
+			if afterUID > 0 && uint32(m.UID) <= afterUID {
 				continue
 			}
-			h := Header{UID: uint32(m.UID), MessageID: m.Envelope.MessageID, Subject: m.Envelope.Subject, Date: m.Envelope.Date}
-			if h.Date.IsZero() {
-				h.Date = m.InternalDate
-			}
-			if len(m.Envelope.From) > 0 {
-				h.FromName, h.FromAddr = m.Envelope.From[0].Name, m.Envelope.From[0].Addr()
-			}
 			for _, f := range m.Flags {
-				if f == imap.FlagSeen {
-					h.Seen = true
-				}
+				flags[m.UID] = flags[m.UID] || f == imap.FlagSeen
 			}
-			if len(m.BodySection) > 0 {
-				h.Body, h.HTML, h.ListUnsub = parseBody(m.BodySection[0].Bytes)
-				if hasCID(h.HTML) {
-					h.HTML = inlineImages(c, m.UID, h.HTML)
-				}
+			dates[m.UID] = m.InternalDate
+			if !have[m.UID] {
+				pending = append(pending, m.UID)
 			}
-			out = append(out, h)
-		}
-		if len(out) > limit {
-			out = out[len(out)-limit:]
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	selected := true // the scan's connection left the folder selected
+	for _, u := range pending {
+		var hs []Header
+		ferr := r.do(func(c *imapclient.Client) error {
+			if !selected {
+				if _, err := c.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+					return err
+				}
+				selected = true
+			}
+			var s imap.UIDSet
+			s.AddNum(u)
+			var gerr error
+			hs, gerr = oneFetch(c, s, 0)
+			return gerr
+		})
+		switch {
+		case ferr == nil:
+			out = append(out, hs...)
+		case degradable(ferr):
+			selected = false // the dead connection dials again next round
+			out = append(out, Header{UID: uint32(u), Date: dates[u], Seen: flags[u],
+				Malformed: true, FetchErr: ferr.Error()})
+		default:
+			return out, ferr
+		}
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
 }
 
 func (r *IMAP) Flags(folder string, limit int) (out map[uint32]bool, err error) {

@@ -10,6 +10,10 @@ import (
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
+// ErrNoSecret reports that an account exists locally (for example synced via
+// iCloud) without a password or token in this Mac's keychain.
+var ErrNoSecret = errors.New("no credential on this Mac")
+
 // Secrets keeps the passwords of accounts, in the system's keychain.
 type Secrets interface {
 	Get(accountID string) (string, error)
@@ -30,6 +34,12 @@ var UI = Who{Actor: store.ActorMe, Client: "ui"}
 type Service struct {
 	Store   *store.Store
 	Secrets Secrets
+	// Cloud, when set, syncs account metadata (never credentials) across Macs.
+	Cloud KVStore
+	// CloudSeeded and MarkCloudSeeded track whether this Mac has merged its
+	// existing local accounts into Cloud once.
+	CloudSeeded     func() bool
+	MarkCloudSeeded func()
 	// Dial opens a server for an account; NewIMAP by default.
 	Dial func(a store.Account, secret string) Remote
 	// Changed is called after anything changed, from any goroutine.
@@ -40,6 +50,7 @@ type Service struct {
 	Arrived func([]store.Message)
 
 	mu      sync.Mutex
+	cloudMu sync.Mutex
 	remotes map[string]Remote
 }
 
@@ -100,6 +111,7 @@ func (s *Service) AddAccount(providerID, email, secret string) (store.Account, e
 	if err := s.Store.UpsertAccount(a); err != nil {
 		return store.Account{}, err
 	}
+	s.pushAccountUpsert(a)
 	s.Changed()
 	return a, nil
 }
@@ -115,6 +127,9 @@ func (s *Service) RemoveAccount(id string) error {
 	s.mu.Unlock()
 	s.Secrets.Delete(id)
 	err := s.Store.DeleteAccount(id)
+	if err == nil {
+		s.pushAccountRemove(id)
+	}
 	s.Changed()
 	return err
 }
@@ -168,6 +183,11 @@ func (s *Service) SyncAccount(a store.Account) error {
 	return errors.Join(errs...)
 }
 
+// unreadableSubject names, in a list, a message the server sent in a shape
+// the parser refused. Its UID still counts toward the folder's watermark so
+// the next sync asks for mail after it, not for it again.
+const unreadableSubject = "(无法解析的邮件)"
+
 func (s *Service) syncFolder(a store.Account, r Remote, f Folder) error {
 	last := s.Store.LastUID(a.ID, f.Name)
 	limit := firstSync
@@ -175,28 +195,46 @@ func (s *Service) syncFolder(a store.Account, r Remote, f Folder) error {
 		limit = laterSync
 	}
 	hs, err := r.Fetch(f.Name, last, limit)
-	if err != nil {
-		return err
-	}
+	// Keep what came before a fetch failure too: a connection can die
+	// mid-range, and what it already read is real.
 	notify := s.Arrived != nil && last > 0 && f.Role == store.RoleInbox
 	var arrived []store.Message
 	for _, h := range hs {
-		snippet := Snippet(PlainText(h.Body), 140)
-		if err := s.Store.UpsertMessage(store.Message{
-			AccountID: a.ID, Folder: f.Name, Role: f.Role, UID: h.UID,
-			ThreadKey: ThreadKey(h.Subject), FromName: h.FromName, FromAddr: h.FromAddr,
-			Subject: h.Subject, Snippet: snippet, Body: h.Body, HTML: h.HTML, Date: h.Date, Seen: h.Seen,
-			Category: Categorize(h.FromAddr, h.ListUnsub),
-		}); err != nil {
+		var m store.Message
+		if h.Malformed {
+			// The server sent this UID in a shape the parser refused. A
+			// marker row holds the UID so the next sync asks for what is
+			// after it, and the list shows why it is there.
+			m = store.Message{
+				AccountID: a.ID, Folder: f.Name, Role: f.Role, UID: h.UID,
+				Subject: unreadableSubject, Snippet: h.FetchErr, Body: h.FetchErr,
+				Date: h.Date, Seen: h.Seen, Category: store.CatNotification,
+			}
+			if m.Date.IsZero() {
+				m.Date = time.Now()
+			}
+		} else {
+			snippet := Snippet(PlainText(h.Body), 140)
+			m = store.Message{
+				AccountID: a.ID, Folder: f.Name, Role: f.Role, UID: h.UID,
+				ThreadKey: ThreadKey(h.Subject), FromName: h.FromName, FromAddr: h.FromAddr,
+				Subject: h.Subject, Snippet: snippet, Body: h.Body, HTML: h.HTML, Date: h.Date, Seen: h.Seen,
+				Category: Categorize(h.FromAddr, h.ListUnsub),
+			}
+		}
+		if err := s.Store.UpsertMessage(m); err != nil {
 			return err
 		}
-		if notify && !h.Seen {
+		if notify && !h.Seen && !h.Malformed {
 			arrived = append(arrived, store.Message{
 				ID: s.Store.MessageID(a.ID, f.Name, h.UID), AccountID: a.ID, Folder: f.Name,
 				UID: h.UID, ThreadKey: ThreadKey(h.Subject), FromName: h.FromName, FromAddr: h.FromAddr,
-				Subject: h.Subject, Snippet: snippet, Date: h.Date,
+				Subject: h.Subject, Snippet: m.Snippet, Date: h.Date,
 			})
 		}
+	}
+	if err != nil {
+		return err
 	}
 	if len(arrived) > 0 {
 		s.Arrived(arrived)

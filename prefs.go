@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
+	"github.com/monoedge-labs/zmail/internal/mailbox"
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
@@ -18,9 +20,23 @@ type prefs struct {
 	// NotifyOff turns the desktop notice of new mail off. Notices are on by
 	// default: the first one asks macOS for permission anyway.
 	NotifyOff bool `json:"notify_off"`
+	// ICloudSeeded records that this Mac has merged its local accounts into
+	// iCloud KVS once.
+	ICloudSeeded bool `json:"icloud_seeded,omitempty"`
 }
 
+var prefsMu sync.Mutex
+
 func loadPrefs(dir string) (p prefs) {
+	prefsMu.Lock()
+	defer prefsMu.Unlock()
+	return loadPrefsLocked(dir)
+}
+
+func loadPrefsLocked(dir string) (p prefs) {
+	if dir == "" {
+		return p
+	}
 	if b, err := os.ReadFile(filepath.Join(dir, "prefs.json")); err == nil {
 		json.Unmarshal(b, &p)
 	}
@@ -31,11 +47,46 @@ func (p prefs) save(dir string) error {
 	if dir == "" {
 		return nil
 	}
+	prefsMu.Lock()
+	defer prefsMu.Unlock()
+	if !p.ICloudSeeded && loadPrefsLocked(dir).ICloudSeeded {
+		p.ICloudSeeded = true
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
 	b, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "prefs.json"), b, 0o600)
+}
+
+// wireCloud attaches iCloud KVS account sync to svc when the binary has the
+// ubiquity kvstore entitlement, backing its one-time seed flag in prefs.json.
+func wireCloud(svc *mailbox.Service, dir string, onChange func()) {
+	svc.Cloud = openICloudKVS(onChange)
+	if svc.Cloud == nil || dir == "" {
+		return
+	}
+	svc.CloudSeeded = func() bool {
+		return loadPrefs(dir).ICloudSeeded
+	}
+	svc.MarkCloudSeeded = func() {
+		prefsMu.Lock()
+		defer prefsMu.Unlock()
+		p := loadPrefsLocked(dir)
+		if p.ICloudSeeded {
+			return
+		}
+		p.ICloudSeeded = true
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return
+		}
+		if b, err := json.Marshal(p); err == nil {
+			_ = os.WriteFile(filepath.Join(dir, "prefs.json"), b, 0o600)
+		}
+	}
 }
 
 // labelGroup is the rows (by index) that carry a label; Label "" holds the

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -22,9 +23,15 @@ const keychainService = "zmail"
 // keychain keeps the passwords of accounts in the system's keychain.
 type keychain struct{}
 
-func (keychain) Get(id string) (string, error) { return keyring.Get(keychainService, id) }
-func (keychain) Set(id, s string) error        { return keyring.Set(keychainService, id, s) }
-func (keychain) Delete(id string) error        { return keyring.Delete(keychainService, id) }
+func (keychain) Get(id string) (string, error) {
+	s, err := keyring.Get(keychainService, id)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return "", mailbox.ErrNoSecret
+	}
+	return s, err
+}
+func (keychain) Set(id, s string) error { return keyring.Set(keychainService, id, s) }
+func (keychain) Delete(id string) error { return keyring.Delete(keychainService, id) }
 
 func main() {
 	if runCLI(os.Args[1:]) {
@@ -63,6 +70,7 @@ func main() {
 	a := newApp(st, svc)
 	if !*demo {
 		a.dir, a.dbPath, a.priv, a.prefs, a.sec = dir, dbPath, loadPrivacy(dir), loadPrefs(dir), keychain{}
+		wireCloud(svc, dir, func() { a.mergeCloud() })
 	}
 	svc.Changed = a.refresh
 	svc.Arrived = a.arrived
@@ -85,6 +93,7 @@ func main() {
 			a.ensureModel()
 			ctx, cancel := context.WithCancel(context.Background())
 			a.win.OnClosed(cancel)
+			mygo.App.OnDidBecomeActive(func() { a.mergeCloud() })
 			go func() { // accounts added by `zmail account add` appear without a restart
 				for t := time.NewTicker(5 * time.Second); ; {
 					select {
@@ -95,9 +104,13 @@ func main() {
 					}
 				}
 			}()
-			go svc.Run(ctx, 2*time.Minute, func(err error) {
-				a.win.Update(func() { a.notice = err.Error() })
-			})
+			go func() {
+				a.mergeCloudNow()
+				svc.Run(ctx, 2*time.Minute, func(err error) {
+					msg := visibleSyncError(err)
+					a.win.Update(func() { a.notice = msg })
+				})
+			}()
 		}
 	})
 	if err := mygo.App.Run(); err != nil {
