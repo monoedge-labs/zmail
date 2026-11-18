@@ -87,10 +87,12 @@ type app struct {
 	syncing     bool
 
 	// Sidebar.
-	accounts []store.Account
-	folders  []string
-	unread   map[string]int
-	total    int
+	accounts    []store.Account
+	folders     []string
+	unread      map[string]int
+	total       int
+	needAuth    map[string]bool // accounts missing credentials in this Mac's keychain
+	authChecked map[string]bool // accounts whose keychain status has been checked
 
 	// Statistics.
 	range_ int // index of ranges
@@ -163,6 +165,7 @@ func newApp(st *store.Store, svc *mailbox.Service) *app {
 		unread: map[string]int{}, pages: map[pageKey]*mailPage{}, codes: map[int64]bool{},
 		veils: map[veilKey]veil{}, want: map[veilKey]bool{}, asked: map[veilKey]bool{},
 		pendAt: map[int64]time.Time{}, waveAt: map[int64]time.Time{},
+		needAuth: map[string]bool{}, authChecked: map[string]bool{},
 	}
 	a.vm = &viewModel{dir: a.modelFiles, done: a.refresh, windowed: func() bool { return a.win != nil }, st: st}
 	a.router.Animation = &ui.Snappy
@@ -186,6 +189,7 @@ func (a *app) refresh() {
 func (a *app) poll() {
 	mygo.RunOnMain(func() {
 		if dbStamp(a.dbPath) != a.stamp {
+			clear(a.authChecked)
 			a.reload()
 			a.win.Invalidate()
 		}
@@ -204,13 +208,37 @@ func dbStamp(path string) string {
 	return b.String()
 }
 
+// visibleSyncError drops mailbox.ErrNoSecret entries (handled by the "待登录"
+// state in the UI) while preserving real sync or server errors.
+func visibleSyncError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var parts []string
+	var walk func(error)
+	walk = func(e error) {
+		if e == nil {
+			return
+		}
+		if j, ok := e.(interface{ Unwrap() []error }); ok {
+			for _, sub := range j.Unwrap() {
+				walk(sub)
+			}
+			return
+		}
+		if errors.Is(e, mailbox.ErrNoSecret) {
+			return
+		}
+		parts = append(parts, e.Error())
+	}
+	walk(err)
+	return strings.Join(parts, "\n")
+}
+
 // async runs work off the main thread, shows its error and reloads.
 func (a *app) async(work func() error) {
 	done := func(err error) {
-		a.notice = ""
-		if err != nil {
-			a.notice = err.Error()
-		}
+		a.notice = visibleSyncError(err)
 		a.reload()
 	}
 	if a.win == nil { // under test: no window, no other thread
@@ -297,6 +325,115 @@ func (a *app) reload() {
 
 	a.stats, _ = a.st.Stats(time.Now().AddDate(0, 0, -rangeDays[a.range_]))
 	a.syncFace()
+	a.checkAccountAuth()
+}
+
+// checkAccountAuth checks keychain presence for accounts not yet checked,
+// off the main thread when windowed so `/usr/bin/security` never stalls UI frames.
+func (a *app) checkAccountAuth() {
+	if a.sec == nil {
+		return
+	}
+	alive := make(map[string]bool, len(a.accounts))
+	var pending []string
+	for _, acc := range a.accounts {
+		alive[acc.ID] = true
+		if !a.authChecked[acc.ID] {
+			a.authChecked[acc.ID] = true
+			pending = append(pending, acc.ID)
+		}
+	}
+	for id := range a.needAuth {
+		if !alive[id] {
+			delete(a.needAuth, id)
+		}
+	}
+	for id := range a.authChecked {
+		if !alive[id] {
+			delete(a.authChecked, id)
+		}
+	}
+	if len(pending) == 0 {
+		return
+	}
+	sec := a.sec
+	probe := func() map[string]bool {
+		res := make(map[string]bool, len(pending))
+		for _, id := range pending {
+			_, err := sec.Get(id)
+			res[id] = errors.Is(err, mailbox.ErrNoSecret)
+		}
+		return res
+	}
+	if a.win == nil {
+		for id, missing := range probe() {
+			a.needAuth[id] = missing
+		}
+		return
+	}
+	go func() {
+		res := probe()
+		a.win.Update(func() {
+			for id, missing := range res {
+				a.needAuth[id] = missing
+			}
+			a.win.Invalidate()
+		})
+	}()
+}
+
+// mergeCloudNow pulls account configurations from iCloud KVS, refreshes UI
+// state, and immediately syncs any newly added account with a local secret.
+func (a *app) mergeCloudNow() {
+	added, err := a.svc.MergeCloud()
+	if err != nil || len(added) == 0 {
+		return
+	}
+	reset := func() {
+		for _, acc := range added {
+			delete(a.authChecked, acc.ID)
+			delete(a.needAuth, acc.ID)
+		}
+		a.reload()
+	}
+	if a.win == nil {
+		reset()
+	} else {
+		a.win.Update(reset)
+	}
+	for _, acc := range added {
+		if a.sec != nil {
+			if _, err := a.sec.Get(acc.ID); err != nil {
+				continue
+			}
+		}
+		if err := a.svc.SyncAccount(acc); err != nil {
+			if msg := visibleSyncError(err); msg != "" && a.win != nil {
+				a.win.Update(func() { a.notice = msg })
+			}
+		}
+	}
+}
+
+// mergeCloud runs mergeCloudNow off the main thread.
+func (a *app) mergeCloud() { go a.mergeCloudNow() }
+
+// openAccountSignIn opens the sign-in sheet at step 1 for an existing account
+// synced via iCloud that lacks a credential on this Mac.
+func (a *app) openAccountSignIn(acc store.Account) {
+	idx := 0
+	for i, sv := range services {
+		if sv.id == acc.Provider {
+			idx = i
+			break
+		}
+	}
+	a.add = addState{
+		open:     true,
+		provider: idx,
+		step:     1,
+		email:    acc.Email,
+	}
 }
 
 // variant is a way a message shows: as it is, or with its values hidden by
@@ -667,10 +804,8 @@ func (a *app) syncNow() {
 	go func() {
 		err := a.svc.SyncAll()
 		a.win.Update(func() {
-			a.syncing, a.notice = false, ""
-			if err != nil {
-				a.notice = err.Error()
-			}
+			a.syncing = false
+			a.notice = visibleSyncError(err)
 			a.reload()
 		})
 	}()
@@ -768,6 +903,8 @@ func (a *app) finishAdd(err error) {
 		s.open = false
 		s.email, s.secret, s.clientID, s.clientSecret = "", "", "", ""
 		s.err = ""
+		clear(a.needAuth)
+		clear(a.authChecked)
 	} else if s.open && !errors.Is(err, context.Canceled) {
 		s.err = err.Error()
 		if errors.Is(err, context.DeadlineExceeded) {

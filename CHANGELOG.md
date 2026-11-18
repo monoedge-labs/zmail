@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6
+
+- **Account list syncs across Macs via iCloud.** Configured accounts (`id`, `provider`, `email`, `host`) sync through `NSUbiquitousKeyValueStore` (`accounts` key) on launch, foreground activation, external iCloud updates, and when adding or removing accounts.
+- **Credentials stay local.** App passwords and OAuth tokens never leave your Mac's login keychain. Accounts synced onto another Mac appear with a "待登录" badge and a one-click "登录" prompt that opens the sign-in sheet with the provider and address pre-filled.
+
 ## 0.6.5
 
 - **The agent's face keeps its disc.** The empty reader pane's avatar used to sit in a dark square: the web view's hole clears the card under it, so the face now paints its own disc in the window's base color, as the statistics page's does.

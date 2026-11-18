@@ -1,10 +1,11 @@
 #!/bin/sh
 # Builds the macOS app. Without MACOS_SIGNING_IDENTITY it is signed ad hoc,
 # which runs on this Mac only. Extra arguments go to `mygo build`:
-# `scripts/release.sh -upload` makes the draft GitHub release, and needs both
-# variables below because a public release is signed and notarized.
-#   MACOS_SIGNING_IDENTITY  "Developer ID Application: Name (TEAMID)"
-#   NOTARY_PROFILE          a keychain profile made by `xcrun notarytool store-credentials`
+# `scripts/release.sh -upload` makes the draft GitHub release, and needs all three
+# variables below because a public release is signed, provisioned and notarized.
+#   MACOS_SIGNING_IDENTITY    "Developer ID Application: Name (TEAMID)"
+#   MACOS_PROVISIONING_PROFILE path to the Developer ID .provisionprofile (for iCloud KVS)
+#   NOTARY_PROFILE            a keychain profile made by `xcrun notarytool store-credentials`
 # The build also signs the update files (what installed apps update from) when
 # it has the key of `mygo keygen`: from MYGO_UPDATER_PRIVATE_KEY, else from the
 # key file in mygo's configuration directory. Without it they are skipped.
@@ -31,8 +32,8 @@ fi
 
 for arg in "$@"; do
   case $arg in -upload | --upload | -upload=true | --upload=true)
-    if [ -z "$MACOS_SIGNING_IDENTITY" ] || [ -z "$NOTARY_PROFILE" ]; then
-      echo "release.sh: -upload needs MACOS_SIGNING_IDENTITY and NOTARY_PROFILE" >&2
+    if [ -z "$MACOS_SIGNING_IDENTITY" ] || [ -z "$MACOS_PROVISIONING_PROFILE" ] || [ -z "$NOTARY_PROFILE" ]; then
+      echo "release.sh: -upload needs MACOS_SIGNING_IDENTITY, MACOS_PROVISIONING_PROFILE and NOTARY_PROFILE" >&2
       exit 1
     fi ;;
   esac
@@ -41,10 +42,25 @@ done
 if [ -z "$MACOS_SIGNING_IDENTITY" ]; then
   exec go tool mygo build -platform darwin/arm64,darwin/amd64 -skip-notarize "$@"
 fi
-if [ -z "$NOTARY_PROFILE" ]; then
-  exec go tool mygo build -platform darwin/arm64,darwin/amd64 -sign "$MACOS_SIGNING_IDENTITY" -skip-notarize "$@"
+
+if [ -n "$MACOS_PROVISIONING_PROFILE" ] && [ ! -f "$MACOS_PROVISIONING_PROFILE" ]; then
+  echo "release.sh: provisioning profile not found: $MACOS_PROVISIONING_PROFILE" >&2
+  exit 1
 fi
-# mygo reads the notarization profile from mygo.json: add it for this run only.
+
+# mygo reads entitlements, provisioning profile and notarization profile from mygo.json:
+# inject them for this run only when present.
 tmp=$(mktemp); cp mygo.json "$tmp"; trap 'cp "$tmp" mygo.json; rm -f "$tmp"' EXIT
-sed "s|\"out\": \"build\"|\"out\": \"build\", \"macos\": {\"notarize\": {\"keychainProfile\": \"$NOTARY_PROFILE\"}}|" "$tmp" > mygo.json
-go tool mygo build -platform darwin/arm64,darwin/amd64 -sign "$MACOS_SIGNING_IDENTITY" "$@"
+jq \
+  --arg profile "$MACOS_PROVISIONING_PROFILE" \
+  --arg notary "$NOTARY_PROFILE" \
+  '
+  (if $profile != "" then .macos += {"entitlements": "entitlements.plist", "provisioningProfile": $profile} else . end)
+  | (if $notary != "" then .macos += {"notarize": {"keychainProfile": $notary}} else . end)
+  ' "$tmp" > mygo.json
+
+if [ -z "$NOTARY_PROFILE" ]; then
+  go tool mygo build -platform darwin/arm64,darwin/amd64 -sign "$MACOS_SIGNING_IDENTITY" -skip-notarize "$@"
+else
+  go tool mygo build -platform darwin/arm64,darwin/amd64 -sign "$MACOS_SIGNING_IDENTITY" "$@"
+fi

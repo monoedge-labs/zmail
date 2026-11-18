@@ -249,7 +249,9 @@ func (a *app) navItem(c *ui.Context, p pal, id string, ic *ui.SVG, tint ui.Color
 			w, col = 600, p.ink
 		}
 		ui.Text(c, label).SingleLine().Grow(1).FontWeight(w).TextColor(col)
-		if count > 0 {
+		if strings.HasPrefix(id, "acct:") && a.needAuth[strings.TrimPrefix(id, "acct:")] {
+			ui.Text(c, "待登录").FontSize(12).FontWeight(600).TextColor(p.orange)
+		} else if count > 0 {
 			t := ui.Text(c, fmt.Sprint(count)).FontSize(12).TextColor(p.soft)
 			if hot {
 				t.TextColor(p.blue).FontWeight(600)
@@ -338,6 +340,7 @@ func (a *app) listPane(c *ui.Context, p pal) {
 		if a.notice != "" {
 			ui.Text(c, a.notice).FontSize(12).TextColor(p.danger)
 		}
+		a.authBanner(c, p)
 
 		// The search above may have reloaded the rows: group them after it.
 		people, notes, news, _ := a.groups()
@@ -391,6 +394,50 @@ func (a *app) listPane(c *ui.Context, p pal) {
 // byLabel is whether the list is grouped by label now. It is only once some
 // mail has a label, so that a user of none sees the usual groups.
 func (a *app) byLabel() bool { return a.prefs.GroupByLabel && a.anyLabel }
+
+func (a *app) pendingAuthAccounts() []store.Account {
+	var out []store.Account
+	if strings.HasPrefix(a.nav, "acct:") {
+		id := strings.TrimPrefix(a.nav, "acct:")
+		for _, acc := range a.accounts {
+			if acc.ID == id && a.needAuth[acc.ID] {
+				out = append(out, acc)
+			}
+		}
+		return out
+	}
+	if a.nav == "mail:inbox" {
+		for _, acc := range a.accounts {
+			if a.needAuth[acc.ID] {
+				out = append(out, acc)
+			}
+		}
+	}
+	return out
+}
+
+func (a *app) authBanner(c *ui.Context, p pal) {
+	pending := a.pendingAuthAccounts()
+	if len(pending) == 0 {
+		return
+	}
+	ui.Column(c).Gap(6).Padding(10, 12).Radius(12).Background(p.orange.Alpha(.12)).Children(func() {
+		ui.Text(c, "以下账户已从 iCloud 同步，请在当前 Mac 登录一次以开始收信：").FontSize(12).TextColor(p.orange)
+		for _, acc := range pending {
+			ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Text(c, acc.Email).FontSize(13).FontWeight(500).TextColor(p.ink).SingleLine().Grow(1).MinWidth(0)
+				b := ui.ButtonBase(c).Height(26).Padding(0, 10).Radius(13).Label("登录 " + acc.Email)
+				b.Children(func() { ui.Text(c, "登录").FontSize(12).FontWeight(600).TextColor(p.orange) })
+				if b.Hovered() {
+					b.Background(p.orange.Alpha(.16))
+				}
+				if b.Clicked() {
+					a.openAccountSignIn(acc)
+				}
+			})
+		}
+	})
+}
 
 // rowKey identifies a row among the others: the mail's ID, and its group
 // when the list is grouped by label, as one mail may stand in several.

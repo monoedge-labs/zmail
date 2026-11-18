@@ -6,6 +6,7 @@ tool github.com/egoist/mygo/cmd/mygo
 
 require (
 	github.com/clipperhouse/uax29/v2 v2.5.0
+	github.com/ebitengine/purego v0.11.2
 	github.com/egoist/asuka v0.1.1
 	github.com/egoist/mygo v0.8.4-0.20261108082913-9233663736ca
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
@@ -22,7 +23,6 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/ebitengine/purego v0.11.2 // indirect
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect

@@ -134,9 +134,11 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 	if testDial != nil {
 		svc.Dial = testDial
 	}
+	wireCloud(svc, dir, nil)
 
 	switch args[0] {
 	case "sync":
+		_, _ = svc.MergeCloud()
 		return svc.SyncAll()
 	case "label":
 		return cliLabel(svc, args[1:], out)
@@ -166,6 +168,7 @@ func cliIn(dir string, sec mailbox.Secrets, args []string, in io.Reader, out io.
 		return err
 	}
 
+	_, _ = svc.MergeCloud()
 	switch args[1] {
 	case "list":
 		accs, err := st.Accounts()

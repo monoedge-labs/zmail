@@ -10,6 +10,10 @@ import (
 	"github.com/monoedge-labs/zmail/internal/store"
 )
 
+// ErrNoSecret reports that an account exists locally (for example synced via
+// iCloud) without a password or token in this Mac's keychain.
+var ErrNoSecret = errors.New("no credential on this Mac")
+
 // Secrets keeps the passwords of accounts, in the system's keychain.
 type Secrets interface {
 	Get(accountID string) (string, error)
@@ -30,6 +34,12 @@ var UI = Who{Actor: store.ActorMe, Client: "ui"}
 type Service struct {
 	Store   *store.Store
 	Secrets Secrets
+	// Cloud, when set, syncs account metadata (never credentials) across Macs.
+	Cloud KVStore
+	// CloudSeeded and MarkCloudSeeded track whether this Mac has merged its
+	// existing local accounts into Cloud once.
+	CloudSeeded     func() bool
+	MarkCloudSeeded func()
 	// Dial opens a server for an account; NewIMAP by default.
 	Dial func(a store.Account, secret string) Remote
 	// Changed is called after anything changed, from any goroutine.
@@ -40,6 +50,7 @@ type Service struct {
 	Arrived func([]store.Message)
 
 	mu      sync.Mutex
+	cloudMu sync.Mutex
 	remotes map[string]Remote
 }
 
@@ -100,6 +111,7 @@ func (s *Service) AddAccount(providerID, email, secret string) (store.Account, e
 	if err := s.Store.UpsertAccount(a); err != nil {
 		return store.Account{}, err
 	}
+	s.pushAccountUpsert(a)
 	s.Changed()
 	return a, nil
 }
@@ -115,6 +127,9 @@ func (s *Service) RemoveAccount(id string) error {
 	s.mu.Unlock()
 	s.Secrets.Delete(id)
 	err := s.Store.DeleteAccount(id)
+	if err == nil {
+		s.pushAccountRemove(id)
+	}
 	s.Changed()
 	return err
 }

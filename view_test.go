@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image/png"
 	"math"
@@ -794,4 +795,58 @@ func TestCodeTagWhenHidden(t *testing.T) {
 		}
 	}
 	shot(t, tt, "21-code-hidden")
+}
+
+type missingSecretStore struct{ memSecrets }
+
+func (m missingSecretStore) Get(id string) (string, error) {
+	v, ok := m.memSecrets[id]
+	if !ok {
+		return "", mailbox.ErrNoSecret
+	}
+	return v, nil
+}
+
+func TestICloudAccountNeedsSignIn(t *testing.T) {
+	a := testApp(t)
+	syncedAcc := store.Account{
+		ID: "icloud:synced@icloud.com", Provider: "icloud", Email: "synced@icloud.com", Host: "imap.mail.me.com:993",
+	}
+	if err := a.st.UpsertAccount(syncedAcc); err != nil {
+		t.Fatal(err)
+	}
+	// Give existing demo accounts credentials while syncedAcc has none locally.
+	sec := missingSecretStore{memSecrets{
+		"google:me@gmail.com":  "tok",
+		"aliyun:me@aliyun.com": "pw",
+		"qq:12345678@qq.com":   "code",
+	}}
+	a.sec = sec
+	a.reload()
+
+	tt := ui.NewTester(a.view, 1360, 900)
+	tt.Advance(200e6)
+	if !tt.HasText("待登录") || !tt.HasText("synced@icloud.com") || !tt.HasText("登录") {
+		t.Fatalf("missing iCloud sign-in prompt in UI: %q", tt.Texts())
+	}
+
+	if err := tt.Click("登录"); err != nil {
+		t.Fatalf("clicking 登录 failed: %v", err)
+	}
+	tt.Advance(200e6)
+	if !a.add.open || a.add.step != 1 || a.add.email != "synced@icloud.com" || services[a.add.provider].id != "icloud" {
+		t.Fatalf("sign-in sheet state = %+v", a.add)
+	}
+
+	// visibleSyncError drops ErrNoSecret while preserving real IMAP failures.
+	joined := errors.Join(
+		fmt.Errorf("synced@icloud.com: %w", fmt.Errorf("password of synced@icloud.com: %w", mailbox.ErrNoSecret)),
+		errors.New("qq@qq.com: dial timeout"),
+	)
+	if got := visibleSyncError(joined); got != "qq@qq.com: dial timeout" {
+		t.Fatalf("visibleSyncError(joined) = %q", got)
+	}
+	if got := visibleSyncError(fmt.Errorf("synced@icloud.com: %w", mailbox.ErrNoSecret)); got != "" {
+		t.Fatalf("visibleSyncError(ErrNoSecret only) = %q, want empty", got)
+	}
 }
