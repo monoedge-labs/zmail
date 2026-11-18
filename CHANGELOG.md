@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.8
+
+- **A malformed message no longer stops the whole folder.** Servers such as QQ can answer a FETCH with a shape the parser refuses — one bad ENVELOPE used to fail the batch, so the sync retried the same message forever and the error bar never cleared. The fetch now lists the UIDs it was after, takes the failed ones one at a time, and keeps a marker for a message it still cannot read: the list shows "(无法解析的邮件)" in its place, and the next sync asks for mail after it.
+- **What a dying connection already read is kept.** A fetch that errors mid-range used to drop every message it had gathered; the sync now saves them before reporting the error.
+
 ## 0.6.7
 
 - **Renamed the app bundle to `com.zausau.zmail`.** macOS treats it as a new app identity, so iCloud account sync data starts over under the new name; local mail data and credentials are unaffected.

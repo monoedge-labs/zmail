@@ -31,6 +31,11 @@ type Header struct {
 	Body      string // as Markdown, cut to a few tens of KB
 	HTML      string // the HTML part as it came, when there is one
 	ListUnsub bool   // has a List-Unsubscribe header
+	// Malformed marks a message the server sent but the IMAP parser refused:
+	// its place is kept so the sync moves past it instead of failing on it
+	// every round. FetchErr says why it failed.
+	Malformed bool
+	FetchErr  string
 }
 
 // Remote is one account's mail server.
