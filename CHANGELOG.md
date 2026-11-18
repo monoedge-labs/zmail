@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.7
+
+- **Renamed the app bundle to `com.zausau.zmail`.** macOS treats it as a new app identity, so iCloud account sync data starts over under the new name; local mail data and credentials are unaffected.
+
 ## 0.6.6
 
 - **Account list syncs across Macs via iCloud.** Configured accounts (`id`, `provider`, `email`, `host`) sync through `NSUbiquitousKeyValueStore` (`accounts` key) on launch, foreground activation, external iCloud updates, and when adding or removing accounts.
