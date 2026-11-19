@@ -71,7 +71,11 @@ func (s *fakeIMAPServer) serve(conn net.Conn) {
 			send(`* %d EXISTS`, len(s.order))
 			send(`* %d RECENT`, len(s.order))
 			send(`* OK [UIDVALIDITY 1] uids`)
-			send(`* OK [UIDNEXT %d] next`, s.order[len(s.order)-1]+1)
+			next := uint32(1)
+			if len(s.order) > 0 {
+				next = s.order[len(s.order)-1] + 1
+			}
+			send(`* OK [UIDNEXT %d] next`, next)
 			send(`%s OK [READ-ONLY] selected`, tag)
 		case "FETCH":
 			setS, items, _ := strings.Cut(arg, " ")
@@ -249,6 +253,16 @@ func TestMalformedEnvelopeSkipsOneMessage(t *testing.T) {
 	}
 	if err := svc.SyncAccount(a); err != nil {
 		t.Fatalf("resync: %v", err)
+	}
+}
+
+// TestFetchEmptyFolder: an empty folder builds no FETCH set; Fetch used to
+// fall into the recovery path with a nil set and panic the whole app at launch.
+func TestFetchEmptyFolder(t *testing.T) {
+	r := newFakeIMAP(&fakeIMAPServer{})
+	hs, err := r.Fetch("INBOX", 0, 500)
+	if err != nil || len(hs) != 0 {
+		t.Fatalf("empty folder: hs=%v err=%v", hs, err)
 	}
 }
 
