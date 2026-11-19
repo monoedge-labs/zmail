@@ -297,6 +297,10 @@ func (r *IMAP) Fetch(folder string, afterUID uint32, limit int) (out []Header, e
 	if err != nil && !degradable(err) {
 		return out, err
 	}
+	// A clean batch is done; an empty folder never built a set at all.
+	if batchErr == nil || set == nil {
+		return out, err
+	}
 	// batchErr != nil: a message in the batch broke the parser, and with it
 	// the connection. On a fresh one, list the UIDs the batch meant to cover
 	// (the same set: the server answers every FETCH line with its UID) and
